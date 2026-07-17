@@ -1,0 +1,21 @@
+# Local agent config / instructions (per repo convention)
+.claude
+AGENTS.md
+CLAUDE.md
+
+# memories-branch worktree (per AGENTS.md git workflow)
+memories-wt/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+uv.lock
+
+# mkdocs build output
+site/

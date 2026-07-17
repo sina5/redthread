@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://sina5.github.io/redthread/sitemap.xml
