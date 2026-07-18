@@ -7,6 +7,8 @@ Portable, git-backed memory for multi-phase agentic workflows.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.3-blue.svg)](CHANGELOG.md)
 
+![Redthread — a red thread running through every phase of a pipeline](docs/assets/redthread.png)
+
 Redthread treats cross-phase context (e.g. train → eval → present, or
 build → test → present) as an **append-only, content-addressed memory** whose
 source of truth is a **git remote**, so context never depends on a hostname or

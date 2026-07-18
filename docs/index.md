@@ -4,6 +4,8 @@ description: Redthread is a portable, git-backed memory for multi-phase agentic 
 
 # Redthread
 
+![Redthread — a red thread running through every phase of a pipeline](assets/redthread.png)
+
 Portable, cross-phase managed memory for agentic workflows.
 
 Redthread treats cross-phase context as an **append-only, content-addressed
