@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {% if page and page.meta and page.meta.title %}
+    {% set og_title = page.meta.title %}
+  {% elif page and page.title and not page.is_homepage %}
+    {% set og_title = page.title ~ " - " ~ config.site_name %}
+  {% else %}
+    {% set og_title = config.site_name %}
+  {% endif %}
+  {% if page and page.meta and page.meta.description %}
+    {% set og_description = page.meta.description %}
+  {% else %}
+    {% set og_description = config.site_description %}
+  {% endif %}
+  {% set og_image = config.site_url ~ "assets/redthread.png" %}
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="{{ config.site_name }}" />
+  <meta property="og:title" content="{{ og_title }}" />
+  <meta property="og:description" content="{{ og_description }}" />
+  <meta property="og:url" content="{{ page.canonical_url }}" />
+  <meta property="og:image" content="{{ og_image }}" />
+  <meta property="og:image:width" content="1280" />
+  <meta property="og:image:height" content="720" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="{{ og_title }}" />
+  <meta name="twitter:description" content="{{ og_description }}" />
+  <meta name="twitter:image" content="{{ og_image }}" />
+  {% if page and page.is_homepage %}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareSourceCode",
+    "name": "Redthread",
+    "description": "{{ config.site_description }}",
+    "url": "{{ config.site_url }}",
+    "codeRepository": "{{ config.repo_url }}",
+    "programmingLanguage": "Python",
+    "runtimePlatform": "Python 3.11+",
+    "operatingSystem": "Windows, Linux, macOS",
+    "license": "https://opensource.org/licenses/MIT",
+    "author": {
+      "@type": "Person",
+      "name": "{{ config.site_author }}"
+    }
+  }
+  </script>
+  {% endif %}
+{% endblock %}

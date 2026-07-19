@@ -1,5 +1,6 @@
 ---
-description: The on-disk JSON/YAML schema for Redthread's store — entries, artifacts, handoffs, and run records.
+title: Store format — Redthread's on-disk schema reference
+description: The on-disk JSON/YAML schema for a Redthread memory store — context entries, content-addressed artifacts, phase handoffs, and run records, all versioned for forward compatibility.
 ---
 
 # Store format

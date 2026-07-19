@@ -1,5 +1,6 @@
 ---
-description: How Redthread's git-backed store, sync, phase adapters, and MCP agent memory fit together.
+title: Architecture — how Redthread's git-backed agent memory works
+description: How Redthread's git-backed store, conflict-free sync, phase adapters, worktree mode, and MCP agent memory fit together — and the two design decisions that carry it all.
 ---
 
 # Architecture
