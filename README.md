@@ -1,6 +1,6 @@
 # Redthread
 
-Portable, git-backed memory for multi-phase agentic workflows.
+Portable, git-backed memory for AI agents and multi-phase workflows.
 
 [![CI](https://github.com/sina5/redthread/actions/workflows/ci.yml/badge.svg)](https://github.com/sina5/redthread/actions/workflows/ci.yml)
 [![Docs](https://github.com/sina5/redthread/actions/workflows/docs.yml/badge.svg)](https://sina5.github.io/redthread/)
@@ -9,11 +9,14 @@ Portable, git-backed memory for multi-phase agentic workflows.
 
 ![Redthread — a red thread running through every phase of a pipeline](docs/assets/redthread.png)
 
-Redthread treats cross-phase context (e.g. train → eval → present, or
-build → test → present) as an **append-only, content-addressed memory** whose
-source of truth is a **git remote**, so context never depends on a hostname or
-folder path. Any node can clone the store and continue a run; each phase
-publishes a **curated handoff** to the next.
+Your coding agent's memory lives in a local folder (`.claude/`, `.agent/`)
+on one machine. Redthread replaces it with a **git-backed memory store
+served over MCP**: the same memory is visible to your agent on every machine
+that clones the store. The same store carries cross-phase pipeline context
+(e.g. train → eval → present, or build → test → present) as an
+**append-only, content-addressed memory** whose source of truth is a
+**git remote** — any node can clone the store and continue a run, and each
+phase publishes a **curated handoff** to the next.
 
 Phase names are data, not code: every project declares its own pipeline in
 `project.yaml`. Nothing domain-specific lives below the adapter layer.
@@ -22,6 +25,9 @@ Phase names are data, not code: every project declares its own pipeline in
 
 ## Features
 
+- **Agent memory over MCP** — point a coding agent's MCP config (Claude
+  Code, Cursor, Windsurf, VS Code, ...) at a Redthread store instead of a
+  local `.claude`/`.agent` folder.
 - **Portable by construction** — every entry is keyed by `project_id` /
   `run_id` / `phase` / `entry_id`, never by hostname or absolute path. Swap
   the machine running a phase mid-run with `redthread resume`.
@@ -33,8 +39,6 @@ Phase names are data, not code: every project declares its own pipeline in
   for the next phase to consume, never the raw entry log.
 - **Report, deck, and docs from handoffs** — `redthread present` renders a
   markdown report, a slide deck, and a docs-site tree from any run.
-- **Agent memory over MCP** — point a coding agent's MCP config at a
-  Redthread store instead of a local `.claude`/`.agent` folder.
 - **Worktree mode** — run the store as an orphan-branch `git worktree` of
   your existing code repo, so its active branch is never touched.
 
@@ -46,8 +50,17 @@ pip install redthread          # or: uv tool install redthread
 
 ## Quick start
 
+Create a store for your project, then give it to your coding agent as
+memory over MCP:
+
 ```bash
 redthread init my-project --phases build,test,present --store ./my-store
+claude mcp add redthread -- redthread mcp-serve --store /path/to/my-store
+```
+
+Or drive it from the CLI:
+
+```bash
 redthread run start --store ./my-store
 redthread log <run_id> build note '{"msg": "hello"}' --store ./my-store
 redthread read <run_id> --store ./my-store

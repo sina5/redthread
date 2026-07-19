@@ -1,5 +1,9 @@
 site_name: Redthread
-site_description: Portable, cross-phase managed memory for agentic workflows
+site_description: >-
+  Portable, git-backed memory for AI agents and multi-phase pipelines —
+  sync context, artifacts, and agent memory across machines through a git
+  remote, with MCP support for Claude Code, Cursor, and other coding agents.
+site_author: Sina Fathi-Kazerooni
 site_url: https://sina5.github.io/redthread/
 repo_url: https://github.com/sina5/redthread
 repo_name: sina5/redthread
@@ -7,6 +11,7 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  custom_dir: overrides
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -45,3 +50,4 @@ nav:
   - Usage: usage.md
   - Architecture: architecture.md
   - Store format: store-format.md
+  - FAQ: faq.md
