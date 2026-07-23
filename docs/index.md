@@ -28,7 +28,10 @@ pip install redthread          # or: uv tool install redthread
 
 Drop this into `AGENTS.md` (or `CLAUDE.md`) and your agent installs
 Redthread, creates the store, and registers the MCP server itself the
-next time it opens this project — no manual steps at all.
+next time it opens this project — no manual steps at all. By default the
+store is an **orphan-branch git worktree of this same repo**, so there's
+no second remote to provision and this repo's active branch is never
+touched.
 
 <div class="scrollable-code" markdown="1">
 ````markdown
@@ -46,10 +49,18 @@ Install Redthread:
 uv tool install redthread   # or: pip install redthread
 ```
 
-Create the store (skip if `./redthread-store` already exists):
+Create the store as an orphan-branch worktree of this repo (skip if
+`./redthread-store` already exists):
 
 ```bash
-redthread init this-project --phases build,test,present --store ./redthread-store
+redthread init this-project --phases build,test,present \
+  --store ./redthread-store --worktree-repo .
+```
+
+Keep it out of this repo's own working tree status:
+
+```bash
+echo redthread-store/ >> .gitignore
 ```
 
 Register the MCP server — run whichever block below matches the platform
@@ -75,11 +86,11 @@ webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&
 code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve","--store","./redthread-store"]}'
 ```
 
-Give the store a remote and sync it, so memory follows the project across
-machines instead of staying stuck on this one:
+Sync it so memory follows the project across machines instead of staying
+stuck on this one — the store's remote is simply this repo's own
+`origin`, so there's no separate remote to set up:
 
 ```bash
-git -C ./redthread-store remote add origin <your-store-remote-url>
 redthread sync --store ./redthread-store
 ```
 
@@ -99,7 +110,8 @@ redthread sync --store ./redthread-store
 </div>
 
 See the [full AGENTS.md example](agents-md.md) for variants — a
-no-install `uvx` version and one for a Redthread source checkout.
+no-install `uvx` version, one for a Redthread source checkout, and one
+for a separate (non-worktree) store repo.
 
 !!! danger "Never store secrets"
     The memory store is a git repo, usually pushed to a shared remote —

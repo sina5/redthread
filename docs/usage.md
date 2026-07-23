@@ -33,7 +33,9 @@ the worktree gets checked out; `--worktree-repo` never has its active branch
 touched or moved. Good default when you don't want to provision a second
 remote; trades that off against the store's frequent auto-commits landing in
 the same repo as your code (see [Worktree mode](architecture.md#worktree-mode)
-for the trade-off in full).
+for the trade-off in full). This is the default the
+[AGENTS.md example](agents-md.md) sets up, since it needs nothing beyond a
+repo you already have.
 
 ### Adding a phase later
 

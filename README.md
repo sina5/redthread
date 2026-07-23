@@ -55,7 +55,9 @@ pip install redthread          # or: uv tool install redthread
 Copy the [AGENTS.md example](https://sina5.github.io/redthread/agents-md/)
 into your project and your agent installs Redthread, creates the store,
 and registers the MCP server itself the next time it opens this project —
-no manual steps at all.
+no manual steps at all. By default the store is an **orphan-branch git
+worktree of this same repo**, so there's no second remote to provision
+and this repo's active branch is never touched.
 
 ### Option 2 — Register the MCP server yourself
 
