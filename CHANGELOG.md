@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.4] - 2026-07-23
+
+### Added
+
+- `redthread project add-phase <phase>` (and `LocalStore.add_phase`) —
+  extend a project's declared phase pipeline after `init`. By default
+  backfills the new phase as `pending` into every run that isn't already
+  `done`/`failed`; completed runs keep their original phase-status
+  snapshot untouched. `--no-backfill` limits the change to future runs.
+- `agents_md_bootstrap` MCP tool (15th tool on the server) — writes a
+  short Redthread usage policy into the current project's `AGENTS.md`
+  (or `CLAUDE.md`, whichever already exists) so agents use this store as
+  memory automatically in future sessions, without being told each time.
+  Idempotent — a no-op once the instructions are present — and documented
+  as the first tool an agent should call on a new project.
+- macOS added to the CI test matrix, alongside Windows and Ubuntu.
+
 ## [0.3] - 2026-07-16
 
 ### Added

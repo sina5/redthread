@@ -27,7 +27,7 @@ Create a store, then register it with your agent — pick your client:
 redthread init my-project --phases build,test,present --store ./my-store
 ```
 
-=== "Claude Code"
+=== "🟠 Claude Code"
 
     ```bash
     claude mcp add redthread -- uvx redthread mcp-serve --store ./my-store
@@ -40,9 +40,9 @@ redthread init my-project --phases build,test,present --store ./my-store
     ```
 
     Verify with `/mcp` inside Claude Code — `redthread` should show as
-    connected with 14 tools.
+    connected with 15 tools.
 
-=== "Cursor"
+=== "⚫ Cursor"
 
     Cursor installs MCP servers via a deeplink rather than a CLI command.
     This generates one and opens it, using only Python (already a
@@ -57,12 +57,29 @@ redthread init my-project --phases build,test,present --store ./my-store
     "
     ```
 
+    Already have `redthread` installed? Drop `uvx` from the config:
+
+    ```bash
+    python -c "
+    import base64, json, webbrowser
+    config = {'command': 'redthread', 'args': ['mcp-serve', '--store', './my-store']}
+    encoded = base64.b64encode(json.dumps(config).encode()).decode()
+    webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&config={encoded}')
+    "
+    ```
+
     Accept the install confirmation Cursor opens with to finish.
 
-=== "VS Code (Copilot)"
+=== "🔵 VS Code (Copilot)"
 
     ```bash
     code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","./my-store"]}'
+    ```
+
+    Already have `redthread` installed? Drop `uvx`:
+
+    ```bash
+    code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve","--store","./my-store"]}'
     ```
 
     Use `code-insiders` instead of `code` if you're on the Insiders build.
@@ -70,10 +87,14 @@ redthread init my-project --phases build,test,present --store ./my-store
 Ask the agent to call `memory_write`, then `memory_list`, and you'll see
 the files land under `memory/` in the store.
 
-Then make the agent use its memory *unprompted*: add a short policy note
-to your project's `AGENTS.md` or `CLAUDE.md` — copy the
-[ready-made AGENTS.md example](agents-md.md), which also covers installing
-Redthread and registering the MCP server in one paste.
+!!! tip "Make your agent actually use it"
+    Registering the server only gives the agent the *capability*. Ask it
+    to call `agents_md_bootstrap` and it writes a short policy note into
+    this project's `AGENTS.md`/`CLAUDE.md` itself — idempotent, so it's
+    safe to have the agent call it at the start of every session. Setting
+    up a new project from scratch instead? Copy the [ready-made AGENTS.md
+    example](agents-md.md), which also covers installing Redthread and
+    registering the MCP server in one paste.
 
 To make that memory portable, give the store a remote and sync it:
 

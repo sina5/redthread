@@ -9,9 +9,15 @@ repo_url: https://github.com/sina5/redthread
 repo_name: sina5/redthread
 edit_uri: ""
 
+exclude_docs: |
+  overrides/
+
+extra_css:
+  - stylesheets/extra.css
+
 theme:
   name: material
-  custom_dir: overrides
+  custom_dir: docs/overrides
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -36,6 +42,7 @@ theme:
 
 markdown_extensions:
   - admonition
+  - md_in_html
   - pymdownx.details
   - pymdownx.superfences
   - pymdownx.highlight

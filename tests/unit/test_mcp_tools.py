@@ -67,3 +67,51 @@ def test_context_log_rejects_phase_outside_pipeline(tmp_path):
     run_id = tools.run_start(store)["run_id"]
     with pytest.raises(StoreError):
         tools.context_log(store, run_id, "deploy", "note")
+
+
+def test_agents_md_bootstrap_creates_file_when_none_exists(tmp_path):
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    result = tools.agents_md_bootstrap(tmp_path / "store", project_dir)
+
+    assert result == {"status": "created", "file": str(project_dir / "AGENTS.md")}
+    text = (project_dir / "AGENTS.md").read_text(encoding="utf-8")
+    assert "## Agent memory (Redthread)" in text
+    assert str(tmp_path / "store") in text
+
+
+def test_agents_md_bootstrap_appends_to_existing_agents_md(tmp_path):
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "AGENTS.md").write_text("# Existing notes\n", encoding="utf-8")
+
+    result = tools.agents_md_bootstrap(tmp_path / "store", project_dir)
+
+    assert result["status"] == "appended"
+    text = (project_dir / "AGENTS.md").read_text(encoding="utf-8")
+    assert text.startswith("# Existing notes\n")
+    assert "## Agent memory (Redthread)" in text
+
+
+def test_agents_md_bootstrap_prefers_existing_claude_md_over_creating_agents_md(tmp_path):
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text("# Claude notes\n", encoding="utf-8")
+
+    result = tools.agents_md_bootstrap(tmp_path / "store", project_dir)
+
+    assert result["file"] == str(project_dir / "CLAUDE.md")
+    assert not (project_dir / "AGENTS.md").exists()
+
+
+def test_agents_md_bootstrap_is_idempotent(tmp_path):
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+
+    first = tools.agents_md_bootstrap(tmp_path / "store", project_dir)
+    assert first["status"] == "created"
+    text_after_first = (project_dir / "AGENTS.md").read_text(encoding="utf-8")
+
+    second = tools.agents_md_bootstrap(tmp_path / "store", project_dir)
+    assert second == {"status": "already_present", "file": str(project_dir / "AGENTS.md")}
+    assert (project_dir / "AGENTS.md").read_text(encoding="utf-8") == text_after_first

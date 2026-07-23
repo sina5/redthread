@@ -57,19 +57,28 @@ redthread project add-phase deploy --store ./my-store
 redthread mcp-serve [--store PATH]
 ```
 
-Runs an MCP server (stdio) exposing the store as 14 tools: `store_init`,
+Runs an MCP server (stdio) exposing the store as 15 tools: `store_init`,
 `run_start`/`run_list`, `context_log`/`context_read`,
 `artifact_put`/`artifact_get`, `summary_update`/`summary_get`,
-`handoff_publish`/`handoff_get`, and `memory_write`/`memory_read`/
-`memory_list` for long-term memory not tied to any run. Point a coding
-agent's MCP config at this instead of its local `.claude`/`.agent` folder —
-the same memory becomes visible on every machine that clones the store.
+`handoff_publish`/`handoff_get`, `memory_write`/`memory_read`/
+`memory_list` for long-term memory not tied to any run, and
+`agents_md_bootstrap` (below). Point a coding agent's MCP config at this
+instead of its local `.claude`/`.agent` folder — the same memory becomes
+visible on every machine that clones the store.
+
+!!! tip "Skip the manual AGENTS.md paste"
+    Once the server is registered, ask the agent to call
+    `agents_md_bootstrap` — it writes the same policy shown in [Make your
+    agent actually use it](#make-your-agent-actually-use-it-agentsmd)
+    straight into this project's `AGENTS.md` (or `CLAUDE.md`) for you.
+    It's idempotent, so it's safe to have the agent call it at the start
+    of every session — a no-op once the instructions are already there.
 
 ### Connect your agent
 
 Pick your client — each tab is ready to paste as-is.
 
-=== "Claude Code"
+=== "🟠 Claude Code"
 
     ```bash
     claude mcp add redthread -- uvx redthread mcp-serve --store /path/to/my-store
@@ -89,13 +98,13 @@ Pick your client — each tab is ready to paste as-is.
     your team.
 
     Verify with `/mcp` inside Claude Code — `redthread` should show as
-    connected with 14 tools. A quick smoke test is asking the agent to call
+    connected with 15 tools. A quick smoke test is asking the agent to call
     `run_list` or `memory_list`.
 
     To run from a source checkout instead, replace `uvx redthread` with
     `uv run --directory /path/to/checkout redthread`.
 
-=== "Cursor"
+=== "⚫ Cursor"
 
     Cursor doesn't have a CLI `add` command — the closest equivalent is a
     one-click install deeplink. This generates one and opens it, using only
@@ -111,6 +120,8 @@ Pick your client — each tab is ready to paste as-is.
     ```
 
     Cursor opens with an install confirmation — accept it to finish.
+    Already have `redthread` installed? Swap `'command': 'uvx'` for
+    `'command': 'redthread'` and drop `redthread` from the front of `args`.
 
     To configure by hand instead: Settings → MCP (or *MCP & Integrations*)
     → *Add Custom MCP*, or edit `.cursor/mcp.json` (project, shareable) /
@@ -127,10 +138,16 @@ Pick your client — each tab is ready to paste as-is.
     }
     ```
 
-=== "VS Code (Copilot)"
+=== "🔵 VS Code (Copilot)"
 
     ```bash
     code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","/path/to/my-store"]}'
+    ```
+
+    Already have `redthread` installed? Drop `uvx`:
+
+    ```bash
+    code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve","--store","/path/to/my-store"]}'
     ```
 
     Use `code-insiders` instead of `code` if you're on the Insiders build.
@@ -228,7 +245,7 @@ Pick your client — each tab is ready to paste as-is.
     )
     ```
 
-!!! note "Windows"
+!!! warning "Windows"
     GUI clients don't always inherit your shell's PATH. If a server fails
     to spawn, use the absolute path to `uvx.exe` (or the installed
     `redthread.exe`) as `command`.
@@ -259,6 +276,12 @@ Namespaces are free-form — `sessions` and `notes` are just a convention
 that has worked well; pick whatever fits your team. For a self-contained
 version of this file that also covers installing Redthread and registering
 the MCP server, see the [AGENTS.md example](agents-md.md).
+
+!!! danger "Never store secrets"
+    The memory store is a git repo, usually pushed to a shared remote —
+    treat it like any other repo. API keys, tokens, and credentials
+    written to `memory_write` are committed to history and visible to
+    everyone with access to the store.
 
 ## Runs
 
@@ -434,7 +457,7 @@ redthread handoff get "$run_id" build --store ./s   # consumed by the test phase
 redthread read "$run_id" --store ./s                # full raw history
 ```
 
-!!! note "Windows / PowerShell"
+!!! warning "Windows / PowerShell"
     Passing inline JSON as a shell argument is quoting-fragile in PowerShell.
     Write the JSON to a temp file and use the file-based commands
     (`handoff publish`, `summary set`), or call `redthread.store.LocalStore`

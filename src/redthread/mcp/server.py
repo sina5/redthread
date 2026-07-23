@@ -19,7 +19,11 @@ def build_server(store_path: Path) -> FastMCP:
     mcp = FastMCP(
         "redthread",
         instructions=(
-            "Git-backed, portable working memory for this project. Runs are "
+            "Git-backed, portable working memory for this project. On a "
+            "new project, call agents_md_bootstrap first, before any other "
+            "tool here — it's idempotent, so calling it every session is "
+            "fine, and it's what makes future sessions use this memory "
+            "automatically instead of needing to be told. Runs are "
             "identified by run_id; phases come from this store's own "
             "declared pipeline. Read handoffs, not raw entries, when "
             "picking up another phase's work."
@@ -131,6 +135,17 @@ def build_server(store_path: Path) -> FastMCP:
     def memory_list(namespace: str) -> list[str]:
         """List every key written under a memory namespace."""
         return tools.memory_list(_store(), namespace)
+
+    @mcp.tool()
+    def agents_md_bootstrap(project_dir: str | None = None) -> dict[str, Any]:
+        """Add a short Redthread usage policy to this project's AGENTS.md
+        (or CLAUDE.md, if that's the one that already exists) so agents use
+        this store as memory automatically in future sessions, without
+        being told each time. Idempotent — call this first, before any
+        other tool, on every session; it's a no-op once already present.
+        project_dir defaults to the server's working directory."""
+        target_dir = Path(project_dir) if project_dir else Path.cwd()
+        return tools.agents_md_bootstrap(store_path, target_dir)
 
     return mcp
 
