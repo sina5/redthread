@@ -78,8 +78,8 @@ that session because the MCP server failed to spawn.
 `uv tool install` and `pip install` are equivalent here — pick whichever
 your team already standardizes on. If you'd rather not require a prior
 install at all, swap the `mcp add` line for the `uvx`-based one from
-[Usage](usage.md#claude-code), which fetches `redthread` from PyPI on
-first launch with no separate install step:
+[Usage](usage.md#connect-your-agent), which fetches `redthread` from PyPI
+on first launch with no separate install step:
 
 ```bash
 claude mcp add redthread -- uvx redthread mcp-serve --store ./redthread-store

@@ -40,8 +40,8 @@ any git remote and every machine that clones it sees the same memory. To
 make the agent use its memory unprompted, drop this
 [ready-made AGENTS.md example](agents-md.md) into your project — it covers
 install, MCP registration, and usage policy in one paste.
-[Cursor, Windsurf, Claude Desktop, VS Code, and other MCP clients](usage.md#other-mcp-clients)
-use the same one-line server command.
+[Cursor, Windsurf, Claude Desktop, VS Code, and other MCP clients](usage.md#connect-your-agent)
+connect just as easily — pick your client and paste.
 
 Prefer to keep everything in your existing code repo? [Worktree
 mode](architecture.md#worktree-mode) runs the store as an orphan branch of

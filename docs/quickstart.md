@@ -21,24 +21,54 @@ uv sync    # then prefix each `redthread` command below with `uv run`
 
 ## Give your coding agent portable memory (MCP)
 
-Create a store and register it with Claude Code:
+Create a store, then register it with your agent — pick your client:
 
 ```bash
 redthread init my-project --phases build,test,present --store ./my-store
-
-claude mcp add redthread -- redthread mcp-serve --store ./my-store
 ```
 
-No prior install? `uvx` fetches `redthread` from PyPI on first launch, so
-this works even without the `pip install`/`uv tool install` step above:
+=== "Claude Code"
 
-```bash
-claude mcp add redthread -- uvx redthread mcp-serve --store ./my-store
-```
+    ```bash
+    claude mcp add redthread -- uvx redthread mcp-serve --store ./my-store
+    ```
 
-Verify with `/mcp` inside Claude Code — `redthread` should show as
-connected with 14 tools. Ask the agent to call `memory_write`, then
-`memory_list`, and you'll see the files land under `memory/` in the store.
+    Already have `redthread` installed? Drop `uvx`:
+
+    ```bash
+    claude mcp add redthread -- redthread mcp-serve --store ./my-store
+    ```
+
+    Verify with `/mcp` inside Claude Code — `redthread` should show as
+    connected with 14 tools.
+
+=== "Cursor"
+
+    Cursor installs MCP servers via a deeplink rather than a CLI command.
+    This generates one and opens it, using only Python (already a
+    Redthread dependency):
+
+    ```bash
+    python -c "
+    import base64, json, webbrowser
+    config = {'command': 'uvx', 'args': ['redthread', 'mcp-serve', '--store', './my-store']}
+    encoded = base64.b64encode(json.dumps(config).encode()).decode()
+    webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&config={encoded}')
+    "
+    ```
+
+    Accept the install confirmation Cursor opens with to finish.
+
+=== "VS Code (Copilot)"
+
+    ```bash
+    code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","./my-store"]}'
+    ```
+
+    Use `code-insiders` instead of `code` if you're on the Insiders build.
+
+Ask the agent to call `memory_write`, then `memory_list`, and you'll see
+the files land under `memory/` in the store.
 
 Then make the agent use its memory *unprompted*: add a short policy note
 to your project's `AGENTS.md` or `CLAUDE.md` — copy the
@@ -53,9 +83,9 @@ redthread sync --store ./my-store
 ```
 
 Any other machine — or teammate, or agent — that clones the store now sees
-the same memory. Cursor, Windsurf, Claude Desktop, VS Code, Codex CLI, and
-Gemini CLI connect with the same server command; see
-[MCP client setup](usage.md#agent-memory-mcp-server) for each config.
+the same memory. Windsurf, Claude Desktop, Codex CLI, Gemini CLI, and the
+Claude Agent SDK connect just as easily; see the
+[full per-client reference](usage.md#connect-your-agent) for each.
 
 ## 60-second CLI walkthrough
 
