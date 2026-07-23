@@ -1,7 +1,7 @@
 """The requested acceptance scenario: a store that lives as an orphan-branch
 git worktree of a host repo (e.g. the user's code repo), so the host repo's
 currently checked-out branch is never touched, and syncing/resuming reuses
-all the same M2 machinery unchanged.
+all the same portable-sync machinery unchanged.
 """
 
 import subprocess

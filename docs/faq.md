@@ -35,6 +35,15 @@ Claude Agent SDK are all covered with copy-paste configs in
 [Usage](usage.md#agent-memory-mcp-server). The CLI and Python API work
 with no agent at all.
 
+## Can I add a phase to a project after it's already running?
+
+Yes: `redthread project add-phase <name> --store ./my-store`. It appends
+the phase to `project.yaml` and, by default, backfills it as `pending`
+into every run that isn't already `done`/`failed` — completed runs keep
+their original phase-status snapshot as a historical record rather than
+being rewritten. Pass `--no-backfill` to only affect runs started after
+the change. See [Usage](usage.md#set-up-a-project).
+
 ## Is it only for machine-learning pipelines?
 
 No. Phase names are data, declared per project — `build,test,present` and

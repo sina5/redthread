@@ -37,9 +37,9 @@ claude mcp add redthread -- redthread mcp-serve --store /path/to/my-store
 That's it — the agent now reads and writes memory through Redthread's MCP
 tools (`memory_write`, `memory_read`, `context_log`, ...). Push the store to
 any git remote and every machine that clones it sees the same memory. To
-make the agent use its memory unprompted, drop a
-[three-bullet snippet](usage.md#make-your-agent-actually-use-it-agentsmd)
-into your project's `AGENTS.md`.
+make the agent use its memory unprompted, drop this
+[ready-made AGENTS.md example](agents-md.md) into your project — it covers
+install, MCP registration, and usage policy in one paste.
 [Cursor, Windsurf, Claude Desktop, VS Code, and other MCP clients](usage.md#other-mcp-clients)
 use the same one-line server command.
 
@@ -77,6 +77,7 @@ domain-specific lives below the [adapter layer](architecture.md#phase-adapters-h
 
 - [Quickstart](quickstart.md) — install, hook up an agent, drive the CLI
 - [Usage](usage.md) — the full CLI and MCP reference
+- [AGENTS.md example](agents-md.md) — a copy-paste file for your project
 - [FAQ](faq.md) — common questions, compared alternatives
 - [Architecture](architecture.md) — data model, store layout, sync design
 - [Store format](store-format.md) — the on-disk schema reference

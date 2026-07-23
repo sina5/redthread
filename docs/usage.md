@@ -35,6 +35,22 @@ remote; trades that off against the store's frequent auto-commits landing in
 the same repo as your code (see [Worktree mode](architecture.md#worktree-mode)
 for the trade-off in full).
 
+### Adding a phase later
+
+```bash
+redthread project add-phase <phase> [--store PATH] [--no-backfill]
+```
+
+Appends a new phase to the project's pipeline after the fact. By default
+every run that isn't already `done`/`failed` is backfilled with the new
+phase as `pending`, so a mid-flight run can log against it immediately;
+completed runs keep their original phase-status snapshot untouched. Pass
+`--no-backfill` to only affect runs started after the change.
+
+```bash
+redthread project add-phase deploy --store ./my-store
+```
+
 ## Agent memory (MCP server)
 
 ```bash
@@ -177,7 +193,9 @@ This project's agent memory lives in a Redthread store (MCP server
 ````
 
 Namespaces are free-form — `sessions` and `notes` are just a convention
-that has worked well; pick whatever fits your team.
+that has worked well; pick whatever fits your team. For a self-contained
+version of this file that also covers installing Redthread and registering
+the MCP server, see the [AGENTS.md example](agents-md.md).
 
 ## Runs
 

@@ -1,8 +1,8 @@
-"""M5 acceptance: agent memory written through the MCP tool layer on one
-node is visible, byte-for-byte, on a completely fresh clone — the same
-claim the architecture doc makes in section 7: "the same memory is visible
-on the remote trainer, the local evaluator, and the next server you spin
-up," now proven for the MCP-facing surface, not just LocalStore directly.
+"""Agent memory written through the MCP tool layer on one node is visible,
+byte-for-byte, on a completely fresh clone — the same claim the
+architecture doc makes in section 7: "the same memory is visible on the
+remote trainer, the local evaluator, and the next server you spin up," now
+proven for the MCP-facing surface, not just LocalStore directly.
 """
 
 import subprocess

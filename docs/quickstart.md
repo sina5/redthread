@@ -35,7 +35,8 @@ connected with 14 tools. Ask the agent to call `memory_write`, then
 
 Then make the agent use its memory *unprompted*: add a short policy note
 to your project's `AGENTS.md` or `CLAUDE.md` — copy the
-[ready-made snippet](usage.md#make-your-agent-actually-use-it-agentsmd).
+[ready-made AGENTS.md example](agents-md.md), which also covers installing
+Redthread and registering the MCP server in one paste.
 
 To make that memory portable, give the store a remote and sync it:
 
