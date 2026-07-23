@@ -1,6 +1,6 @@
-"""M4 acceptance: the present phase, running on a THIRD node, renders a
-report + deck + docs tree whose facts match the upstream handoffs exactly —
-for both example pipelines, proving the present layer is domain-neutral too.
+"""The present phase, running on a THIRD node, renders a report + deck +
+docs tree whose facts match the upstream handoffs exactly — for both
+example pipelines, proving the present layer is domain-neutral too.
 """
 
 import subprocess

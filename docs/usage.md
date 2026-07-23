@@ -35,6 +35,22 @@ remote; trades that off against the store's frequent auto-commits landing in
 the same repo as your code (see [Worktree mode](architecture.md#worktree-mode)
 for the trade-off in full).
 
+### Adding a phase later
+
+```bash
+redthread project add-phase <phase> [--store PATH] [--no-backfill]
+```
+
+Appends a new phase to the project's pipeline after the fact. By default
+every run that isn't already `done`/`failed` is backfilled with the new
+phase as `pending`, so a mid-flight run can log against it immediately;
+completed runs keep their original phase-status snapshot untouched. Pass
+`--no-backfill` to only affect runs started after the change.
+
+```bash
+redthread project add-phase deploy --store ./my-store
+```
+
 ## Agent memory (MCP server)
 
 ```bash
@@ -49,109 +65,172 @@ Runs an MCP server (stdio) exposing the store as 14 tools: `store_init`,
 agent's MCP config at this instead of its local `.claude`/`.agent` folder —
 the same memory becomes visible on every machine that clones the store.
 
-### Claude Code
+### Connect your agent
 
-Register the server with one command — `uvx` fetches `redthread` from
-PyPI on first launch, so no checkout or prior install is needed:
+Pick your client — each tab is ready to paste as-is.
 
-```bash
-claude mcp add redthread -- uvx redthread mcp-serve --store /path/to/my-store
-```
+=== "Claude Code"
 
-By default this registers the server for the current project only. Add
-`--scope user` to make it available in all your projects, or
-`--scope project` to write a `.mcp.json` you can commit and share with
-your team:
+    ```bash
+    claude mcp add redthread -- uvx redthread mcp-serve --store /path/to/my-store
+    ```
 
-```json
-{
-  "mcpServers": {
-    "redthread": {
-      "command": "uvx",
-      "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
-    }
-  }
-}
-```
+    `uvx` fetches `redthread` from PyPI on first launch, so no checkout or
+    prior install is needed. Already installed (`pip install redthread` or
+    `uv tool install redthread`)? Drop `uvx`:
 
-Verify with `/mcp` inside Claude Code — `redthread` should show as
-connected with 14 tools. A quick smoke test is asking the agent to call
-`run_list` or `memory_list`.
+    ```bash
+    claude mcp add redthread -- redthread mcp-serve --store /path/to/my-store
+    ```
 
-If the CLI is already installed (`pip install redthread` or
-`uv tool install redthread`), the command shortens to:
+    By default this registers the server for the current project only. Add
+    `--scope user` to make it available in all your projects, or
+    `--scope project` to write a `.mcp.json` you can commit and share with
+    your team.
 
-```bash
-claude mcp add redthread -- redthread mcp-serve --store /path/to/my-store
-```
+    Verify with `/mcp` inside Claude Code — `redthread` should show as
+    connected with 14 tools. A quick smoke test is asking the agent to call
+    `run_list` or `memory_list`.
 
-To run from a source checkout instead, replace `uvx redthread` with
-`uv run --directory /path/to/checkout redthread` in any example.
+    To run from a source checkout instead, replace `uvx redthread` with
+    `uv run --directory /path/to/checkout redthread`.
 
-### Other MCP clients
+=== "Cursor"
 
-Any client that supports stdio command servers works. Most reuse the
-exact `mcpServers` JSON block shown above; they differ only in where the
-config file lives.
+    Cursor doesn't have a CLI `add` command — the closest equivalent is a
+    one-click install deeplink. This generates one and opens it, using only
+    Python (already a Redthread dependency, so nothing extra to install):
 
-**Cursor** — Settings → MCP (or *MCP & Integrations*) → *Add Custom MCP*,
-or edit the file directly: `.cursor/mcp.json` in the project root
-(shareable, per-project) or `~/.cursor/mcp.json` (all projects). Same
-`mcpServers` block as above.
+    ```bash
+    python -c "
+    import base64, json, webbrowser
+    config = {'command': 'uvx', 'args': ['redthread', 'mcp-serve', '--store', '/path/to/my-store']}
+    encoded = base64.b64encode(json.dumps(config).encode()).decode()
+    webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&config={encoded}')
+    "
+    ```
 
-**Windsurf** — Settings → Cascade → MCP Servers, or edit
-`~/.codeium/windsurf/mcp_config.json`. Same `mcpServers` block.
+    Cursor opens with an install confirmation — accept it to finish.
 
-**Claude Desktop** — Settings → Developer → Edit Config, which opens
-`claude_desktop_config.json` (`%APPDATA%\Claude\` on Windows,
-`~/Library/Application Support/Claude/` on macOS). Same `mcpServers`
-block; restart the app to take effect.
+    To configure by hand instead: Settings → MCP (or *MCP & Integrations*)
+    → *Add Custom MCP*, or edit `.cursor/mcp.json` (project, shareable) /
+    `~/.cursor/mcp.json` (all projects):
 
-**VS Code (GitHub Copilot)** — run the **MCP: Add Server** command, or
-create `.vscode/mcp.json`. VS Code uses a `servers` key with an explicit
-type instead of `mcpServers`:
-
-```json
-{
-  "servers": {
-    "redthread": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
-    }
-  }
-}
-```
-
-**Codex CLI** — add a TOML table to `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.redthread]
-command = "uvx"
-args = ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
-```
-
-**Gemini CLI** — add the standard `mcpServers` block to
-`~/.gemini/settings.json` (or `.gemini/settings.json` in the project).
-
-**Claude Agent SDK** — pass the server definition programmatically:
-
-```python
-from claude_agent_sdk import ClaudeAgentOptions
-
-options = ClaudeAgentOptions(
-    mcp_servers={
+    ```json
+    {
+      "mcpServers": {
         "redthread": {
-            "command": "uvx",
-            "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"],
+          "command": "uvx",
+          "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
         }
+      }
     }
-)
-```
+    ```
+
+=== "VS Code (Copilot)"
+
+    ```bash
+    code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","/path/to/my-store"]}'
+    ```
+
+    Use `code-insiders` instead of `code` if you're on the Insiders build.
+
+    To configure by hand instead: run **MCP: Add Server** in the Command
+    Palette, or create `.vscode/mcp.json`. VS Code uses a `servers` key
+    with an explicit type instead of `mcpServers`:
+
+    ```json
+    {
+      "servers": {
+        "redthread": {
+          "type": "stdio",
+          "command": "uvx",
+          "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
+        }
+      }
+    }
+    ```
+
+=== "Windsurf"
+
+    No CLI equivalent — edit the config directly: Settings → Cascade → MCP
+    Servers, or `~/.codeium/windsurf/mcp_config.json`:
+
+    ```json
+    {
+      "mcpServers": {
+        "redthread": {
+          "command": "uvx",
+          "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
+        }
+      }
+    }
+    ```
+
+=== "Claude Desktop"
+
+    No CLI equivalent — Settings → Developer → Edit Config, which opens
+    `claude_desktop_config.json` (`%APPDATA%\Claude\` on Windows,
+    `~/Library/Application Support/Claude/` on macOS). Restart the app
+    after saving.
+
+    ```json
+    {
+      "mcpServers": {
+        "redthread": {
+          "command": "uvx",
+          "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
+        }
+      }
+    }
+    ```
+
+=== "Codex CLI"
+
+    Add a TOML table to `~/.codex/config.toml`:
+
+    ```toml
+    [mcp_servers.redthread]
+    command = "uvx"
+    args = ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
+    ```
+
+=== "Gemini CLI"
+
+    Add the standard `mcpServers` block to `~/.gemini/settings.json` (or
+    `.gemini/settings.json` in the project):
+
+    ```json
+    {
+      "mcpServers": {
+        "redthread": {
+          "command": "uvx",
+          "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
+        }
+      }
+    }
+    ```
+
+=== "Claude Agent SDK"
+
+    Pass the server definition programmatically:
+
+    ```python
+    from claude_agent_sdk import ClaudeAgentOptions
+
+    options = ClaudeAgentOptions(
+        mcp_servers={
+            "redthread": {
+                "command": "uvx",
+                "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"],
+            }
+        }
+    )
+    ```
 
 !!! note "Windows"
-    GUI clients don't always inherit your shell's PATH. If the server
-    fails to spawn, use the absolute path to `uvx.exe` (or the installed
+    GUI clients don't always inherit your shell's PATH. If a server fails
+    to spawn, use the absolute path to `uvx.exe` (or the installed
     `redthread.exe`) as `command`.
 
 ### Make your agent actually use it (AGENTS.md)
@@ -177,7 +256,9 @@ This project's agent memory lives in a Redthread store (MCP server
 ````
 
 Namespaces are free-form — `sessions` and `notes` are just a convention
-that has worked well; pick whatever fits your team.
+that has worked well; pick whatever fits your team. For a self-contained
+version of this file that also covers installing Redthread and registering
+the MCP server, see the [AGENTS.md example](agents-md.md).
 
 ## Runs
 

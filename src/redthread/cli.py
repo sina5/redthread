@@ -75,6 +75,28 @@ def init(
     typer.echo(f"initialized store at {store} (phases: {', '.join(phase_list)})")
 
 
+project_app = typer.Typer(no_args_is_help=True, help="Manage a project's declared pipeline")
+app.add_typer(project_app, name="project")
+
+
+@project_app.command("add-phase")
+def project_add_phase(
+    phase: str,
+    store: StoreOpt = Path("./redthread-store"),
+    backfill: Annotated[
+        bool,
+        typer.Option(help="Add the phase as 'pending' to runs that aren't done/failed yet"),
+    ] = True,
+) -> None:
+    """Add a new phase to the project's pipeline, e.g. as requirements grow."""
+    s = _open(store)
+    try:
+        manifest = s.add_phase(phase, backfill_open_runs=backfill)
+    except StoreError as e:
+        _fail(e)
+    typer.echo(f"phases: {', '.join(manifest.phases)}")
+
+
 run_app = typer.Typer(no_args_is_help=True, help="Manage runs")
 app.add_typer(run_app, name="run")
 

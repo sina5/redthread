@@ -1,6 +1,6 @@
-"""M3 acceptance: BOTH example pipelines (ML train/eval, app build/test) run
-end to end across two clones on the exact same core, with each phase
-consuming only its upstream handoff — never raw entries.
+"""Both example pipelines (ML train/eval, app build/test) run end to end
+across two clones on the exact same core, with each phase consuming only
+its upstream handoff — never raw entries.
 """
 
 import subprocess

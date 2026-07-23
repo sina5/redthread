@@ -145,6 +145,37 @@ class LocalStore:
             return []
         return sorted(p.name for p in self.layout.runs_dir.iterdir() if p.is_dir())
 
+    def add_phase(self, phase: str, *, backfill_open_runs: bool = True) -> ProjectManifest:
+        """Append a new phase to the project's declared pipeline.
+
+        Runs already have their own phase-status snapshot in ``run.yaml``
+        taken at ``start_run`` time, so a new phase doesn't automatically
+        appear there. By default this backfills every run that isn't
+        already ``done``/``failed`` with the new phase as ``pending``, so
+        mid-flight runs can immediately log against it. Completed runs are
+        left untouched — their status dict is a historical record.
+        """
+        if phase in self.manifest.phases:
+            raise StoreError(f"phase {phase!r} is already in this project's pipeline")
+        updated = ProjectManifest(
+            project_id=self.manifest.project_id,
+            name=self.manifest.name,
+            phases=[*self.manifest.phases, phase],
+            created_ts=self.manifest.created_ts,
+        )
+        _dump_yaml(self.layout.project_yaml, updated)
+        self.manifest = updated
+        if backfill_open_runs:
+            for run_id in self.list_runs():
+                record = self.get_run(run_id)
+                if record.status in ("done", "failed") or phase in record.phases:
+                    continue
+                record.phases[phase] = "pending"
+                self.save_run(record)
+                self.layout.entries_dir(run_id, phase).mkdir(parents=True, exist_ok=True)
+                self.layout.artifacts_dir(run_id, phase).mkdir(parents=True, exist_ok=True)
+        return updated
+
     def _check_phase(self, phase: str) -> None:
         if phase not in self.manifest.phases:
             raise StoreError(
@@ -252,7 +283,7 @@ class LocalStore:
             raise StoreError(f"phase {phase!r} of run {run_id} has not published a handoff")
         return Handoff.model_validate_json(path.read_text(encoding="utf-8"))
 
-    # ---- artifacts (inline backend only in M1) ----------------------------
+    # ---- artifacts ----------------------------------------------------------
 
     def add_artifact(
         self,

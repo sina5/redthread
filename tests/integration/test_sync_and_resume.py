@@ -1,6 +1,7 @@
-"""The M2 acceptance scenario: a git bare repo as the hub, two clones acting
-as two different nodes, concurrent appends, and a kill-and-resume flow that
-proves swapping the machine running a phase never strands context.
+"""The portable-sync acceptance scenario: a git bare repo as the hub, two
+clones acting as two different nodes, concurrent appends, and a
+kill-and-resume flow that proves swapping the machine running a phase
+never strands context.
 """
 
 import subprocess

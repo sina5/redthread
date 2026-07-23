@@ -83,7 +83,7 @@ def test_artifact_id_collision_is_rejected(tmp_path):
 
 def test_entries_from_two_nodes_do_not_collide_on_filename(tmp_path):
     """Concurrent writers never collide on a filename because the ULID, not
-    the advisory seq, is the identity — the core guarantee behind M2 sync."""
+    the advisory seq, is the identity — the core guarantee behind portable sync."""
     store = LocalStore.init(tmp_path / "store", project_id="demo", phases=["build"])
     run = store.start_run()
     for _ in range(5):
@@ -91,3 +91,47 @@ def test_entries_from_two_nodes_do_not_collide_on_filename(tmp_path):
     entries_dir = store.layout.entries_dir(run.run_id, "build")
     filenames = [p.name for p in entries_dir.glob("*.json")]
     assert len(filenames) == len(set(filenames)) == 5
+
+
+def test_add_phase_extends_pipeline_and_new_runs_pick_it_up(tmp_path):
+    store = LocalStore.init(tmp_path / "store", project_id="demo", phases=["build", "test"])
+    manifest = store.add_phase("deploy")
+    assert manifest.phases == ["build", "test", "deploy"]
+
+    # reopening the store re-reads project.yaml from disk
+    reopened = LocalStore(tmp_path / "store")
+    assert reopened.manifest.phases == ["build", "test", "deploy"]
+
+    run = reopened.start_run()
+    assert set(run.phases) == {"build", "test", "deploy"}
+    reopened.log(run.run_id, "deploy", "note", payload={"msg": "ship it"})
+
+
+def test_add_phase_rejects_duplicate(tmp_path):
+    store = LocalStore.init(tmp_path / "store", project_id="demo", phases=["build", "test"])
+    with pytest.raises(StoreError):
+        store.add_phase("test")
+
+
+def test_add_phase_backfills_open_runs_but_not_finished_ones(tmp_path):
+    store = LocalStore.init(tmp_path / "store", project_id="demo", phases=["build", "test"])
+    open_run = store.start_run()
+    finished_run = store.start_run()
+    finished_run.status = "done"
+    store.save_run(finished_run)
+
+    store.add_phase("deploy")
+
+    reloaded_open = store.get_run(open_run.run_id)
+    assert reloaded_open.phases["deploy"] == "pending"
+    assert store.layout.entries_dir(open_run.run_id, "deploy").exists()
+
+    # a finished run's phase-status snapshot is left as a historical record
+    reloaded_finished = store.get_run(finished_run.run_id)
+    assert "deploy" not in reloaded_finished.phases
+
+    # the new phase is valid pipeline-wide either way — logging still works,
+    # it just won't be reflected in a finished run's own status dict
+    store.log(open_run.run_id, "deploy", "note", payload={})
+    store.log(finished_run.run_id, "deploy", "note", payload={})
+    assert "deploy" not in store.get_run(finished_run.run_id).phases
