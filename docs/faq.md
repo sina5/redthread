@@ -1,6 +1,6 @@
 ---
 title: FAQ — Redthread agent memory and pipeline context
-description: Common questions about Redthread — how it compares to local agent memory folders, which MCP clients work, how concurrent writes merge, large-file handling, and Windows support.
+description: Common questions about Redthread — how it compares to local agent memory folders, which MCP clients work, how concurrent writes merge, large-file handling, and Windows/macOS/Linux support.
 ---
 
 # FAQ
@@ -75,11 +75,12 @@ never touched, and no second remote needs provisioning. A dedicated store
 repo is still the better choice once the store needs its own access control
 or lifecycle.
 
-## Does it run on Windows?
+## Does it run on Windows and macOS?
 
-Yes. Redthread is developed on Windows and CI runs the full test suite on
-both Windows and Ubuntu. Store paths are always POSIX-relative internally,
-so stores move cleanly between operating systems.
+Yes to both. Redthread is developed on Windows, and CI runs the full test
+suite on Windows, macOS, and Ubuntu on every change. Store paths are
+always POSIX-relative internally, so stores move cleanly between
+operating systems.
 
 ## What's the license?
 

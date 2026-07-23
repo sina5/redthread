@@ -43,6 +43,7 @@ def test_all_tools_are_registered(tmp_path):
         "memory_write",
         "memory_read",
         "memory_list",
+        "agents_md_bootstrap",
     }
 
 
@@ -99,3 +100,15 @@ def test_error_propagates_as_tool_error(tmp_path):
 
     result = _call(store_path, "context_log", run_id="no-such-run", phase="build", type="note")
     assert result.isError
+
+
+def test_agents_md_bootstrap_through_call_tool(tmp_path):
+    store_path = tmp_path / "store"
+    LocalStore.init(store_path, project_id="demo", phases=["build"])
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+
+    result = _call(store_path, "agents_md_bootstrap", project_dir=str(project_dir))
+    assert not result.isError
+    assert result.structuredContent["status"] == "created"
+    assert (project_dir / "AGENTS.md").exists()

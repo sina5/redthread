@@ -5,7 +5,7 @@ Portable, git-backed memory for AI agents and multi-phase workflows.
 [![CI](https://github.com/sina5/redthread/actions/workflows/ci.yml/badge.svg)](https://github.com/sina5/redthread/actions/workflows/ci.yml)
 [![Docs](https://github.com/sina5/redthread/actions/workflows/docs.yml/badge.svg)](https://sina5.github.io/redthread/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4-blue.svg)](CHANGELOG.md)
 
 ![Redthread — a red thread running through every phase of a pipeline](docs/assets/redthread.png)
 
@@ -48,17 +48,84 @@ Phase names are data, not code: every project declares its own pipeline in
 pip install redthread          # or: uv tool install redthread
 ```
 
-## Quick start
+## Three ways to use it
 
-Create a store for your project, then give it to your coding agent as
-memory over MCP:
+### Option 1 — Paste-and-go: let the agent set itself up (recommended)
+
+Copy the [AGENTS.md example](https://sina5.github.io/redthread/agents-md/)
+into your project and your agent installs Redthread, creates the store,
+and registers the MCP server itself the next time it opens this project —
+no manual steps at all.
+
+### Option 2 — Register the MCP server yourself
+
+Prefer to do it by hand instead of pasting a file? Create a store, then
+register it with your agent — pick your client:
 
 ```bash
 redthread init my-project --phases build,test,present --store ./my-store
-claude mcp add redthread -- redthread mcp-serve --store /path/to/my-store
 ```
 
-Or drive it from the CLI:
+<details open>
+<summary>🟠 Claude Code</summary>
+
+```bash
+claude mcp add redthread -- uvx redthread mcp-serve --store ./my-store
+```
+
+Already have `redthread` installed? Drop `uvx`:
+
+```bash
+claude mcp add redthread -- redthread mcp-serve --store ./my-store
+```
+
+Verify with `/mcp` inside Claude Code — `redthread` should show as connected
+with 15 tools.
+
+</details>
+
+<details>
+<summary>⚫ Cursor</summary>
+
+Cursor installs MCP servers via a one-click deeplink rather than a CLI
+command. This generates one and opens it, using only Python (already a
+Redthread dependency):
+
+```bash
+python -c "
+import base64, json, webbrowser
+config = {'command': 'uvx', 'args': ['redthread', 'mcp-serve', '--store', './my-store']}
+encoded = base64.b64encode(json.dumps(config).encode()).decode()
+webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&config={encoded}')
+"
+```
+
+Accept the install confirmation Cursor opens with to finish.
+
+</details>
+
+<details>
+<summary>🔵 VS Code (Copilot)</summary>
+
+```bash
+code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","./my-store"]}'
+```
+
+Use `code-insiders` instead of `code` if you're on the Insiders build.
+
+</details>
+
+Windsurf, Claude Desktop, Codex CLI, Gemini CLI, and the Claude Agent SDK
+connect just as easily — see
+[MCP client setup](https://sina5.github.io/redthread/usage/#connect-your-agent)
+for each.
+
+Once connected, ask the agent to call `agents_md_bootstrap` — it writes the
+same usage policy as Option 1 above into this project's
+`AGENTS.md`/`CLAUDE.md` itself, so future sessions use this memory
+automatically without being told.
+
+### Option 3 — Drive it from the CLI (no agent required)
 
 ```bash
 redthread run start --store ./my-store

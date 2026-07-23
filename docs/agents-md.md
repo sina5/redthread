@@ -13,6 +13,13 @@ this in `AGENTS.md` gives it the *habit*: install steps so a fresh clone
 can bootstrap itself, the MCP registration command, and a short policy on
 when to read and write memory.
 
+Already have the MCP server registered? Skip the manual paste below and
+just ask the agent to call the `agents_md_bootstrap` tool — it writes the
+same policy section into this project's `AGENTS.md`/`CLAUDE.md` itself,
+and it's idempotent, so it's safe to have the agent call it every session.
+The full example below is for bootstrapping a project that doesn't have
+Redthread set up at all yet.
+
 ## Full example
 
 Copy this into `AGENTS.md` (or `CLAUDE.md`) at your project root and adjust
@@ -39,10 +46,27 @@ Create the store (skip if `./redthread-store` already exists):
 redthread init this-project --phases build,test,present --store ./redthread-store
 ```
 
-Register the MCP server:
+Register the MCP server — run whichever block below matches the platform
+you're running on (skip the rest):
 
 ```bash
+# Claude Code
 claude mcp add redthread -- redthread mcp-serve --store ./redthread-store
+```
+
+```bash
+# Cursor has no CLI add command; this opens a one-click install deeplink
+python -c "
+import base64, json, webbrowser
+config = {'command': 'redthread', 'args': ['mcp-serve', '--store', './redthread-store']}
+encoded = base64.b64encode(json.dumps(config).encode()).decode()
+webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&config={encoded}')
+"
+```
+
+```bash
+# VS Code (GitHub Copilot) — use code-insiders instead of code on Insiders
+code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve","--store","./redthread-store"]}'
 ```
 
 Give the store a remote and sync it, so memory follows the project across
@@ -66,6 +90,12 @@ redthread sync --store ./redthread-store
 - Run `redthread sync --store ./redthread-store` (or let the auto-commit
   daemon handle it) after writing memory, so other machines see it.
 ````
+
+!!! danger "Never store secrets"
+    The memory store is a git repo, usually pushed to a shared remote —
+    treat it like any other repo. API keys, tokens, and credentials
+    written to `memory_write` are committed to history and visible to
+    everyone with access to the store.
 
 ## Why bake install steps into AGENTS.md
 

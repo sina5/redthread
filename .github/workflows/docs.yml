@@ -27,6 +27,8 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: uv run --group docs mkdocs build --strict
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,0 +1,7 @@
+/* Cap tall copy-paste blocks (e.g. the AGENTS.md sample) so they scroll
+   internally instead of dominating the page. Scoped to .scrollable-code
+   only — every other code block is unaffected. */
+.scrollable-code .highlight {
+  max-height: 22rem;
+  overflow-y: auto;
+}

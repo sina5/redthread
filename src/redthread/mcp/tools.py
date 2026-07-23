@@ -100,3 +100,55 @@ def memory_read(store: LocalStore, namespace: str, key: str) -> str | None:
 
 def memory_list(store: LocalStore, namespace: str) -> list[str]:
     return store.memory_list(namespace)
+
+
+_AGENTS_MD_MARKER = "<!-- redthread:agent-instructions -->"
+
+
+def _agents_md_section(store_path: Path) -> str:
+    return (
+        f"{_AGENTS_MD_MARKER}\n"
+        "## Agent memory (Redthread)\n\n"
+        "This project's agent memory lives in a Redthread store (MCP server "
+        f'"redthread", `--store {store_path}`), not local files.\n\n'
+        "- At session start, call `memory_list` / `memory_read` to load relevant\n"
+        "  context before making changes.\n"
+        "- After completing a non-trivial task, write a dated summary with\n"
+        "  `memory_write` (namespace `sessions`, key like `YYYY-MM-DD_short-slug`):\n"
+        "  what changed, why, validation performed, follow-ups.\n"
+        "- Store durable conventions and decisions under the `notes` namespace;\n"
+        "  never store secrets.\n"
+    )
+
+
+def agents_md_bootstrap(store_path: Path, project_dir: Path) -> dict[str, Any]:
+    """Ensure project_dir's AGENTS.md (or CLAUDE.md, if that's the one that
+    already exists) tells agents to use this store as memory. Idempotent —
+    safe to call every session; a no-op once the instructions are present."""
+    project_dir = Path(project_dir)
+    agents_md = project_dir / "AGENTS.md"
+    claude_md = project_dir / "CLAUDE.md"
+
+    for candidate in (agents_md, claude_md):
+        if candidate.exists() and _AGENTS_MD_MARKER in candidate.read_text(
+            encoding="utf-8-sig"
+        ):
+            return {"status": "already_present", "file": str(candidate)}
+
+    if agents_md.exists():
+        target = agents_md
+    elif claude_md.exists():
+        target = claude_md
+    else:
+        target = agents_md
+
+    section = _agents_md_section(store_path)
+    if target.exists():
+        existing = target.read_text(encoding="utf-8-sig")
+        new_text = existing.rstrip("\n") + "\n\n" + section
+        status = "appended"
+    else:
+        new_text = section
+        status = "created"
+    target.write_text(new_text, encoding="utf-8", newline="\n")
+    return {"status": status, "file": str(target)}
