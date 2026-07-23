@@ -71,9 +71,10 @@ name to its own local path, so no absolute path ever enters the store.
 
 Yes — [worktree mode](architecture.md#worktree-mode) attaches the store as
 an orphan-branch `git worktree` of your code repo. Your active branch is
-never touched, and no second remote needs provisioning. A dedicated store
-repo is still the better choice once the store needs its own access control
-or lifecycle.
+never touched, and no second remote needs provisioning. It's the default
+in the [AGENTS.md example](agents-md.md) for exactly that reason. A
+dedicated store repo is still the better choice once the store needs its
+own access control or lifecycle.
 
 ## Does it run on Windows and macOS?
 

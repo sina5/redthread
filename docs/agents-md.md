@@ -23,7 +23,12 @@ Redthread set up at all yet.
 ## Full example
 
 Copy this into `AGENTS.md` (or `CLAUDE.md`) at your project root and adjust
-the store path and namespaces to taste.
+the store path and namespaces to taste. By default it creates the store as
+an **orphan-branch git worktree of this same repo** — no second remote to
+provision, and this repo's active branch is never touched (see [Worktree
+mode](architecture.md#worktree-mode) for how that works). Prefer an
+independent store repo instead? See [Prefer a separate store
+repo](#prefer-a-separate-store-repo) below.
 
 ````markdown
 ## Agent memory (Redthread)
@@ -40,10 +45,18 @@ Install Redthread:
 uv tool install redthread   # or: pip install redthread
 ```
 
-Create the store (skip if `./redthread-store` already exists):
+Create the store as an orphan-branch worktree of this repo (skip if
+`./redthread-store` already exists):
 
 ```bash
-redthread init this-project --phases build,test,present --store ./redthread-store
+redthread init this-project --phases build,test,present \
+  --store ./redthread-store --worktree-repo .
+```
+
+Keep it out of this repo's own working tree status:
+
+```bash
+echo redthread-store/ >> .gitignore
 ```
 
 Register the MCP server — run whichever block below matches the platform
@@ -69,11 +82,11 @@ webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&
 code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve","--store","./redthread-store"]}'
 ```
 
-Give the store a remote and sync it, so memory follows the project across
-machines instead of staying stuck on this one:
+Sync it so memory follows the project across machines instead of staying
+stuck on this one — the store's remote is simply this repo's own
+`origin`, so there's no separate remote to set up:
 
 ```bash
-git -C ./redthread-store remote add origin <your-store-remote-url>
 redthread sync --store ./redthread-store
 ```
 
@@ -96,6 +109,24 @@ redthread sync --store ./redthread-store
     treat it like any other repo. API keys, tokens, and credentials
     written to `memory_write` are committed to history and visible to
     everyone with access to the store.
+
+## Prefer a separate store repo?
+
+Worktree mode is the default above because it needs nothing beyond a repo
+you already have — no second remote to create or know in advance. A
+dedicated store repo is still the better choice once the store needs its
+own access control or lifecycle independent of the code it corresponds to
+(see the trade-off in [Worktree mode](architecture.md#worktree-mode)).
+Swap the "One-time setup" commands for:
+
+```bash
+redthread init this-project --phases build,test,present --store ./redthread-store
+git -C ./redthread-store remote add origin <your-store-remote-url>
+redthread sync --store ./redthread-store
+```
+
+(drop the `.gitignore` line — the store is its own repo, not a directory
+inside this one's working tree.)
 
 ## Why bake install steps into AGENTS.md
 
