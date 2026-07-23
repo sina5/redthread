@@ -26,7 +26,14 @@ Create a store and register it with Claude Code:
 ```bash
 redthread init my-project --phases build,test,present --store ./my-store
 
-claude mcp add redthread -- redthread mcp-serve --store /path/to/my-store
+claude mcp add redthread -- redthread mcp-serve --store ./my-store
+```
+
+No prior install? `uvx` fetches `redthread` from PyPI on first launch, so
+this works even without the `pip install`/`uv tool install` step above:
+
+```bash
+claude mcp add redthread -- uvx redthread mcp-serve --store ./my-store
 ```
 
 Verify with `/mcp` inside Claude Code — `redthread` should show as

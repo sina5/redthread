@@ -7,7 +7,7 @@ site_author: Sina Fathi-Kazerooni
 site_url: https://sina5.github.io/redthread/
 repo_url: https://github.com/sina5/redthread
 repo_name: sina5/redthread
-edit_uri: edit/main/docs/
+edit_uri: ""
 
 theme:
   name: material
@@ -31,7 +31,6 @@ theme:
     - navigation.sections
     - navigation.top
     - content.code.copy
-    - content.action.edit
     - search.suggest
 
 markdown_extensions:
