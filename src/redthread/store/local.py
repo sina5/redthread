@@ -57,7 +57,12 @@ class LocalStore:
 
     @classmethod
     def init(
-        cls, root: Path, project_id: str, phases: list[str], name: str | None = None
+        cls,
+        root: Path,
+        project_id: str,
+        phases: list[str],
+        name: str | None = None,
+        host_repo: Path | None = None,
     ) -> "LocalStore":
         root = Path(root)
         layout = StoreLayout(root)
@@ -72,6 +77,8 @@ class LocalStore:
                 subprocess.run(
                     ["git", "init", "-q", "-b", "main"], cwd=root, check=True, capture_output=True
                 )
+        if host_repo is not None:
+            cls._write_host_marker(host_repo, mode="repo", store_path=root)
         return cls(root)
 
     @classmethod
@@ -100,7 +107,34 @@ class LocalStore:
                 f"({worktree_path}); open it with LocalStore(...) instead"
             )
         cls._write_initial_files(layout, project_id, phases, name)
+        cls._write_host_marker(host_repo, mode="worktree", store_path=worktree_path, branch=branch)
         return cls(worktree_path)
+
+    @staticmethod
+    def _write_host_marker(
+        host_repo: Path,
+        mode: str,
+        store_path: Path,
+        branch: str | None = None,
+    ) -> None:
+        """Record how this store attaches in `<host_repo>/.redthread.yaml`,
+        so a fresh clone of the host repo (or an MCP server launched from
+        it) can find the store without a human remembering flags."""
+        # Deferred: redthread.hostconfig imports redthread.store.gitio, and
+        # importing anything under redthread.store first runs this package's
+        # own __init__ (which imports this module) — a module-level import
+        # here would be circular.
+        from redthread.hostconfig import HostConfig, StoreRef, write_host_config
+
+        host_repo = Path(host_repo)
+        try:
+            rel_path = Path(store_path).resolve().relative_to(host_repo.resolve())
+        except ValueError:
+            rel_path = Path(store_path).resolve()
+        write_host_config(
+            host_repo,
+            HostConfig(store=StoreRef(mode=mode, path=str(rel_path), branch=branch)),
+        )
 
     @staticmethod
     def _write_initial_files(

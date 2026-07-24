@@ -76,6 +76,20 @@ in the [AGENTS.md example](agents-md.md) for exactly that reason. A
 dedicated store repo is still the better choice once the store needs its
 own access control or lifecycle.
 
+## How does a new machine know whether the store is a worktree or a separate repo?
+
+From a small marker, `.redthread.yaml`, committed in the code repo next to
+`AGENTS.md` — it records the mode, path, and branch (or remote URL).
+`redthread init --worktree-repo` writes it automatically; `redthread
+mcp-serve` reads it and attaches the store itself the first time a tool
+needs it, so a second machine only has to clone the code repo and
+register the same MCP command — no flags to remember. Worktree mode
+attaches freely; a repo-mode store needs `--allow-clone` to auto-clone,
+since that means running `git clone` against a URL read from a committed
+file. See [Discovering a store on a fresh
+machine](architecture.md#discovering-a-store-on-a-fresh-machine-redthreadyaml)
+for the full mechanics, or run `redthread attach` by hand any time.
+
 ## Does it run on Windows and macOS?
 
 Yes to both. Redthread is developed on Windows, and CI runs the full test

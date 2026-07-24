@@ -7,6 +7,7 @@ from typing import Annotated
 
 import typer
 
+from redthread import hostconfig
 from redthread.adapters.present import run_present
 from redthread.mcp.server import main as run_mcp_server
 from redthread.models import Handoff
@@ -59,6 +60,14 @@ def init(
     branch: Annotated[
         str, typer.Option(help="Orphan branch name, used only with --worktree-repo")
     ] = "redthread-store",
+    host_repo: Annotated[
+        Path | None,
+        typer.Option(
+            help="Repo-mode only (ignored with --worktree-repo, which always records its "
+            "own host repo): also write .redthread.yaml here, so `redthread attach` or "
+            "an MCP server launched from this repo can find the store later"
+        ),
+    ] = None,
 ) -> None:
     """Create a new Redthread store with a declared phase pipeline."""
     phase_list = [p.strip() for p in phases.split(",") if p.strip()]
@@ -68,7 +77,9 @@ def init(
                 worktree_repo, store, branch, project_id=project_id, phases=phase_list, name=name
             )
         else:
-            LocalStore.init(store, project_id=project_id, phases=phase_list, name=name)
+            LocalStore.init(
+                store, project_id=project_id, phases=phase_list, name=name, host_repo=host_repo
+            )
     except StoreError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
@@ -368,6 +379,27 @@ def resume(
 
 
 @app.command()
+def attach(
+    store: StoreOpt = Path("./redthread-store"),
+    host_repo: Annotated[
+        Path, typer.Option(help="Repo holding .redthread.yaml (defaults to the current directory)")
+    ] = Path("."),
+    allow_clone: Annotated[
+        bool,
+        typer.Option(help="Repo-mode only: clone the store from the url recorded in the marker"),
+    ] = False,
+) -> None:
+    """Make the store at --store exist, per .redthread.yaml in --host-repo —
+    attaching a worktree branch, cloning a store repo (with --allow-clone),
+    or syncing the marker's url once a repo-mode store has a remote."""
+    try:
+        config = hostconfig.attach(host_repo, store, allow_clone=allow_clone)
+    except StoreError as e:
+        _fail(e)
+    typer.echo(f"attached {store} ({config.store.mode} mode)")
+
+
+@app.command()
 def sync(
     store: StoreOpt = Path("./redthread-store"),
     message: str = "redthread sync",
@@ -411,9 +443,25 @@ def present(
 
 
 @app.command("mcp-serve")
-def mcp_serve(store: StoreOpt = Path("./redthread-store")) -> None:
+def mcp_serve(
+    store: StoreOpt = Path("./redthread-store"),
+    host_repo: Annotated[
+        Path,
+        typer.Option(
+            help="Repo to look for .redthread.yaml in if --store doesn't exist yet "
+            "(defaults to the current directory, which is normally the project root)"
+        ),
+    ] = Path("."),
+    allow_clone: Annotated[
+        bool,
+        typer.Option(
+            help="Repo-mode only: allow auto-attach to `git clone` the store from the "
+            "url recorded in .redthread.yaml if it isn't present locally"
+        ),
+    ] = False,
+) -> None:
     """Run the MCP server (stdio) exposing this store as agent memory."""
-    run_mcp_server(Path(store))
+    run_mcp_server(Path(store), host_repo=Path(host_repo), allow_clone=allow_clone)
 
 
 if __name__ == "__main__":

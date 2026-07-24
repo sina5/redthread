@@ -53,10 +53,14 @@ redthread init this-project --phases build,test,present \
   --store ./redthread-store --worktree-repo .
 ```
 
-Keep it out of this repo's own working tree status:
+Keep it out of this repo's own working tree status, but commit the
+`.redthread.yaml` marker `init` just wrote — that's what lets a future
+clone of this repo find the store without anyone repeating this step:
 
 ```bash
 echo redthread-store/ >> .gitignore
+git add .gitignore .redthread.yaml
+git commit -m "Set up Redthread memory"
 ```
 
 Register the MCP server — run whichever block below matches the platform
@@ -109,6 +113,26 @@ redthread sync --store ./redthread-store
     treat it like any other repo. API keys, tokens, and credentials
     written to `memory_write` are committed to history and visible to
     everyone with access to the store.
+
+## On another machine
+
+Once `.redthread.yaml` is committed, every machine after the first gets
+this for free — clone the code repo and register the MCP server, nothing
+else:
+
+```bash
+git clone <this-repo-url>
+claude mcp add redthread -- redthread mcp-serve --store ./redthread-store
+```
+
+The MCP server reads `.redthread.yaml` and attaches the worktree branch
+automatically the first time a tool needs the store — no `redthread init`,
+no `--worktree-repo`/`--branch` flags to remember or redocument. See
+[Discovering a store on a fresh
+machine](architecture.md#discovering-a-store-on-a-fresh-machine-redthreadyaml)
+for exactly how that works, including the repo-mode case (which needs
+`--allow-clone` — cloning a URL read from a committed file is a real trust
+boundary, not a default to cross silently).
 
 ## Prefer a separate store repo?
 

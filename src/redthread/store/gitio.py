@@ -103,6 +103,11 @@ def has_remote(repo: Path, name: str = "origin") -> bool:
     return name in _run(["remote"], cwd=repo).stdout.split()
 
 
+def get_remote_url(repo: Path, name: str = "origin") -> str | None:
+    result = _run(["remote", "get-url", name], cwd=repo, check=False)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
 def current_branch(repo: Path) -> str:
     # `branch --show-current` resolves correctly even on an unborn HEAD
     # (a freshly created branch with zero commits); `rev-parse --abbrev-ref

@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.5] - 2026-07-23
+
+### Added
+
+- `.redthread.yaml` — a small, git-committed marker in the host (code)
+  repo recording how a project's store attaches (worktree branch, or repo
+  URL), so a fresh clone can find it without a human remembering
+  `--worktree-repo`/`--branch`/`--remote` flags. Written automatically by
+  `redthread init --worktree-repo` (and by plain `redthread init
+  --host-repo PATH`).
+- `redthread attach [--store PATH] [--host-repo PATH] [--allow-clone]` —
+  makes a store exist per its marker: attaches an existing or fresh
+  worktree branch, clones a repo-mode store (with `--allow-clone`), or
+  syncs a repo-mode marker's `url` from the store's actual remote once
+  one has been added.
+- `redthread mcp-serve` now reads `.redthread.yaml` (via `--host-repo`,
+  defaulting to its working directory) and attaches the store
+  automatically the first time a tool needs it — including `store_init`,
+  which now returns the existing manifest instead of erroring if another
+  machine already populated the store. Worktree mode attaches freely;
+  repo mode requires `--allow-clone`, since auto-cloning a URL read from a
+  committed file is a real trust boundary. Net effect: a second machine's
+  setup is "clone the code repo, register the same MCP command" — no
+  flags to remember, no manual `git clone` of the store.
+- `redthread.hostconfig` module: `HostConfig`/`StoreRef` models and
+  `read_host_config`/`write_host_config`/`attach` — the implementation
+  behind all of the above, directly unit-tested.
+
 ## [0.4] - 2026-07-23
 
 ### Added

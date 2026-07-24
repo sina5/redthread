@@ -5,7 +5,7 @@ Portable, git-backed memory for AI agents and multi-phase workflows.
 [![CI](https://github.com/sina5/redthread/actions/workflows/ci.yml/badge.svg)](https://github.com/sina5/redthread/actions/workflows/ci.yml)
 [![Docs](https://github.com/sina5/redthread/actions/workflows/docs.yml/badge.svg)](https://sina5.github.io/redthread/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.4-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.5-blue.svg)](CHANGELOG.md)
 
 ![Redthread — a red thread running through every phase of a pipeline](docs/assets/redthread.png)
 
@@ -41,6 +41,10 @@ Phase names are data, not code: every project declares its own pipeline in
   markdown report, a slide deck, and a docs-site tree from any run.
 - **Worktree mode** — run the store as an orphan-branch `git worktree` of
   your existing code repo, so its active branch is never touched.
+- **Auto-attach on a fresh machine** — a committed `.redthread.yaml` marker
+  lets `redthread mcp-serve`/`redthread attach` find and attach the store
+  automatically, so a new clone just needs `git clone` + the same MCP
+  command — no flags to remember.
 
 ## Install
 
