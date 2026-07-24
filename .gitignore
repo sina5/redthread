@@ -3,6 +3,7 @@
 AGENTS.md
 CLAUDE.md
 .mcp.json
+.redthread.yaml
 
 # memories-branch worktree (per AGENTS.md git workflow)
 memories-wt/
