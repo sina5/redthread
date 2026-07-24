@@ -2,6 +2,7 @@
 .claude
 AGENTS.md
 CLAUDE.md
+.mcp.json
 
 # memories-branch worktree (per AGENTS.md git workflow)
 memories-wt/

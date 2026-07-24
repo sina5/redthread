@@ -118,6 +118,67 @@ settings, its activity feed. A dedicated store repo avoids that entirely and
 is the better choice once a store needs its own access control or lifecycle
 independent of the code it corresponds to.
 
+## Discovering a store on a fresh machine (`.redthread.yaml`)
+
+Neither `redthread init` nor `redthread init --worktree-repo` persists which
+mode a project uses anywhere — by design, both are just CLI flags, so
+nothing on disk records "this project's store is a worktree of this repo on
+branch X" for a human or an agent to look up later. Left alone, that means
+a second machine has no way to know whether to pass `--remote`,
+`--worktree-repo`, or nothing at all — the human (or whatever documentation
+they wrote down) is the only source of truth.
+
+`.redthread.yaml` closes that gap: a small, git-committed marker in the
+**host (code) repo**, next to `AGENTS.md`/`.mcp.json`, recording the store's
+mode and how to reach it:
+
+```yaml
+schema_version: 1
+store:
+  mode: worktree          # or "repo"
+  path: ./redthread-store
+  branch: redthread-store # worktree mode
+  # url: git@github.com:you/project-memories.git   # repo mode instead
+```
+
+`LocalStore.init_worktree` writes this automatically — worktree mode always
+knows its own host repo, so there's nothing extra to configure. Plain
+`LocalStore.init` writes it only when called with `host_repo=...` (CLI:
+`redthread init --host-repo PATH`), since repo mode's `url` typically isn't
+known yet at `init` time.
+
+`redthread.hostconfig.attach(host_repo, store_path, allow_clone=False)` is
+the function that reads the marker and makes `store_path` exist:
+
+- **Worktree mode** attaches unconditionally — `gitio.ensure_worktree` does
+  its usual three-way check (local branch → fetch from the host repo's own
+  `origin` → fresh orphan) against whatever `branch` the marker records.
+  This is safe to do automatically: the "remote" is just the code repo you
+  already cloned, not a new trust boundary.
+- **Repo mode** requires `allow_clone=True` to clone a missing store from
+  the marker's `url` — running `git clone` against a URL read from a
+  committed file *is* a real trust boundary (a hostile repo could point it
+  at a poisoned store, and agents act on what they read from memory), so
+  it's never crossed silently. If the store already exists locally instead,
+  `attach` does the reverse: it syncs the marker's `url` from the store's
+  actual `origin` remote — so running `redthread attach` again after
+  `git remote add origin ...` is how a repo-mode marker created before a
+  remote existed gets its `url` filled in, with no separate update command.
+
+Two ways this gets used:
+
+- **`redthread attach [--store PATH] [--host-repo PATH] [--allow-clone]`** —
+  for a human (or a script) that wants the store to exist right now.
+- **`redthread mcp-serve`** calls the same logic itself, lazily, the first
+  time a tool needs the store: if `--store` doesn't exist yet but a marker
+  is found in `--host-repo` (defaults to the server's working directory —
+  normally the project root), it attaches automatically before opening the
+  store. `store_init` respects this too: if attach reveals another machine
+  already populated the store, it returns that store's manifest instead of
+  erroring "already exists." The net effect is that a second machine only
+  ever needs to clone the code repo and register the same MCP server
+  command everyone else uses — no flags to remember, no manual clone step.
+
 ## Phase adapters & handoff contracts
 
 Each phase is a producer/consumer of the shared store via a thin adapter —

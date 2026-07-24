@@ -57,10 +57,14 @@ redthread init this-project --phases build,test,present \
   --store ./redthread-store --worktree-repo .
 ```
 
-Keep it out of this repo's own working tree status:
+Keep it out of this repo's own working tree status, but commit the
+`.redthread.yaml` marker `init` just wrote — that's what lets a future
+clone of this repo find the store without anyone repeating this step:
 
 ```bash
 echo redthread-store/ >> .gitignore
+git add .gitignore .redthread.yaml
+git commit -m "Set up Redthread memory"
 ```
 
 Register the MCP server — run whichever block below matches the platform
@@ -111,7 +115,11 @@ redthread sync --store ./redthread-store
 
 See the [full AGENTS.md example](agents-md.md) for variants — a
 no-install `uvx` version, one for a Redthread source checkout, and one
-for a separate (non-worktree) store repo.
+for a separate (non-worktree) store repo. Once `.redthread.yaml` is
+committed, every machine after the first gets it for free: clone the code
+repo, register the same MCP server command, and it attaches automatically
+— no `redthread init`/`--worktree-repo` step to repeat. See [Discovering a
+store on a fresh machine](architecture.md#discovering-a-store-on-a-fresh-machine-redthreadyaml).
 
 !!! danger "Never store secrets"
     The memory store is a git repo, usually pushed to a shared remote —

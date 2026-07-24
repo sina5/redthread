@@ -37,6 +37,32 @@ for the trade-off in full). This is the default the
 [AGENTS.md example](agents-md.md) sets up, since it needs nothing beyond a
 repo you already have.
 
+### Finding the store again on another machine
+
+`--worktree-repo` always writes a small marker, `.redthread.yaml`, into the
+host repo recording the mode, path, and branch — commit it, and a second
+machine that just clones the code repo can attach without ever passing
+`--worktree-repo`/`--branch` itself:
+
+```bash
+redthread attach [--store PATH] [--host-repo PATH] [--allow-clone]
+```
+
+`--host-repo` defaults to the current directory. For a plain (non-worktree)
+store, pass `--host-repo` to `init` too, so the marker gets written even
+though there's no `--worktree-repo` to imply it:
+
+```bash
+redthread init demo --phases build,test,present --store ./my-store --host-repo .
+```
+
+`attach` also doubles as the way a repo-mode marker's `url` gets filled in
+once you've added a remote — run it again after `git remote add origin
+...` and it syncs the marker from the store's actual remote, no separate
+update command needed. `redthread mcp-serve` reads this marker
+automatically too; see [below](#agent-memory-mcp-server). Full mechanics:
+[Discovering a store on a fresh machine](architecture.md#discovering-a-store-on-a-fresh-machine-redthreadyaml).
+
 ### Adding a phase later
 
 ```bash
@@ -56,7 +82,7 @@ redthread project add-phase deploy --store ./my-store
 ## Agent memory (MCP server)
 
 ```bash
-redthread mcp-serve [--store PATH]
+redthread mcp-serve [--store PATH] [--host-repo PATH] [--allow-clone]
 ```
 
 Runs an MCP server (stdio) exposing the store as 15 tools: `store_init`,
@@ -67,6 +93,15 @@ Runs an MCP server (stdio) exposing the store as 15 tools: `store_init`,
 `agents_md_bootstrap` (below). Point a coding agent's MCP config at this
 instead of its local `.claude`/`.agent` folder — the same memory becomes
 visible on every machine that clones the store.
+
+If `--store` doesn't exist yet but `--host-repo` (defaults to the current
+directory) has a `.redthread.yaml` marker, the first tool call attaches
+the store automatically — worktree mode always, repo mode only with
+`--allow-clone` (cloning a URL read from a committed file is a real trust
+boundary). This is what makes a second machine's setup just "clone the
+code repo, register the same MCP command" — no `redthread init`/`attach`
+step required if the store already exists somewhere. See [Finding the
+store again on another machine](#finding-the-store-again-on-another-machine).
 
 !!! tip "Skip the manual AGENTS.md paste"
     Once the server is registered, ask the agent to call

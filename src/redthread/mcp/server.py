@@ -10,12 +10,16 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from redthread import hostconfig
 from redthread.mcp import tools
 from redthread.store import LocalStore
 
 
-def build_server(store_path: Path) -> FastMCP:
+def build_server(
+    store_path: Path, host_repo: Path | None = None, allow_clone: bool = False
+) -> FastMCP:
     store_path = Path(store_path)
+    host_repo = Path(host_repo) if host_repo else Path.cwd()
     mcp = FastMCP(
         "redthread",
         instructions=(
@@ -30,12 +34,25 @@ def build_server(store_path: Path) -> FastMCP:
         ),
     )
 
+    def _ensure_attached() -> None:
+        # A marker but no store yet means another machine already set this
+        # project up — attach automatically instead of erroring. No marker
+        # at all is a genuinely fresh project; store_init creates one below.
+        if not (store_path / "project.yaml").exists() and hostconfig.read_host_config(host_repo):
+            hostconfig.attach(host_repo, store_path, allow_clone=allow_clone)
+
     def _store() -> LocalStore:
+        _ensure_attached()
         return LocalStore(store_path)
 
     @mcp.tool()
     def store_init(project_id: str, phases: list[str], name: str | None = None) -> dict[str, Any]:
-        """Create the store this server points at, if it doesn't exist yet."""
+        """Create the store this server points at, if it doesn't exist yet.
+        If a .redthread.yaml marker points here and another machine already
+        populated the store, attaches to it instead of erroring."""
+        _ensure_attached()
+        if (store_path / "project.yaml").exists():
+            return LocalStore(store_path).manifest.model_dump(mode="json")
         store = LocalStore.init(store_path, project_id=project_id, phases=phases, name=name)
         return store.manifest.model_dump(mode="json")
 
@@ -150,5 +167,5 @@ def build_server(store_path: Path) -> FastMCP:
     return mcp
 
 
-def main(store_path: Path) -> None:
-    build_server(store_path).run(transport="stdio")
+def main(store_path: Path, host_repo: Path | None = None, allow_clone: bool = False) -> None:
+    build_server(store_path, host_repo=host_repo, allow_clone=allow_clone).run(transport="stdio")
