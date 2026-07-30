@@ -45,8 +45,19 @@ def _dump_yaml(path: Path, model: Any) -> None:
     _write_text(path, yaml.safe_dump(model.model_dump(mode="json"), sort_keys=False))
 
 
+def _publish_host_marker(host_repo: Path, store_path: Path) -> dict[str, Any]:
+    # Deferred for the same reason as _write_host_marker below: importing
+    # redthread.hostconfig at module level would be circular.
+    from redthread.hostconfig import publish_marker
+
+    return publish_marker(host_repo, store_path)
+
+
 class LocalStore:
     def __init__(self, root: Path):
+        #: What `init`/`init_worktree` did with the host repo's marker commit
+        #: (None when this store was merely opened, or publishing was off).
+        self.marker_status: dict[str, Any] | None = None
         self.layout = StoreLayout(Path(root))
         if not self.layout.project_yaml.exists():
             raise StoreError(
@@ -69,6 +80,7 @@ class LocalStore:
         phases: list[str],
         name: str | None = None,
         host_repo: Path | None = None,
+        publish_marker: bool = True,
     ) -> "LocalStore":
         root = Path(root)
         layout = StoreLayout(root)
@@ -86,9 +98,12 @@ class LocalStore:
                 subprocess.run(
                     ["git", "init", "-q", "-b", "main"], cwd=root, check=True, capture_output=True
                 )
+        store = cls(root)
         if host_repo is not None:
             cls._write_host_marker(host_repo, mode="repo", store_path=root)
-        return cls(root)
+            if publish_marker:
+                store.marker_status = _publish_host_marker(host_repo, root)
+        return store
 
     @classmethod
     def init_worktree(
@@ -99,16 +114,25 @@ class LocalStore:
         project_id: str,
         phases: list[str],
         name: str | None = None,
+        publish_marker: bool = True,
     ) -> "LocalStore":
         """Create a store as an orphan-branch git worktree of `host_repo`,
         so the host repo's currently checked-out branch is never touched —
         the same portability as `init`, without needing a separate repo.
+
+        `host_repo` is `git init`-ed if it isn't a repo yet, so this works on
+        a project started five minutes ago. Unless `publish_marker` is False,
+        the store directory is added to the host repo's `.gitignore` and the
+        `.redthread.yaml` marker is committed to its current branch — that
+        commit is what lets the next clone find the store, and it touches
+        those two paths only.
         """
         host_repo = Path(host_repo)
         worktree_path = Path(worktree_path)
         layout = StoreLayout(worktree_path)
         if layout.project_yaml.exists():
             raise StoreError(f"a Redthread store already exists at {worktree_path}")
+        gitio.ensure_repo(host_repo)
         gitio.ensure_worktree(host_repo, worktree_path, branch)
         if layout.project_yaml.exists():
             raise StoreError(
@@ -117,7 +141,10 @@ class LocalStore:
             )
         cls._write_initial_files(layout, project_id, phases, name)
         cls._write_host_marker(host_repo, mode="worktree", store_path=worktree_path, branch=branch)
-        return cls(worktree_path)
+        store = cls(worktree_path)
+        if publish_marker:
+            store.marker_status = _publish_host_marker(host_repo, worktree_path)
+        return store
 
     @staticmethod
     def _write_host_marker(

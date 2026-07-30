@@ -57,15 +57,12 @@ redthread init this-project --phases build,test,present \
   --store ./redthread-store --worktree-repo .
 ```
 
-Keep it out of this repo's own working tree status, but commit the
-`.redthread.yaml` marker `init` just wrote — that's what lets a future
-clone of this repo find the store without anyone repeating this step:
-
-```bash
-echo redthread-store/ >> .gitignore
-git add .gitignore .redthread.yaml
-git commit -m "Set up Redthread memory"
-```
+That command does the rest of the setup itself: it `git init`s this repo if
+it isn't one yet, adds `redthread-store/` to `.gitignore`, and commits the
+`.redthread.yaml` marker to the branch you're on — which is what lets a
+future clone of this repo find the store without anyone repeating any of
+this. It commits those two files and nothing else, so whatever you had
+staged is left alone.
 
 Register the MCP server — run whichever block below matches the platform
 you're running on (skip the rest):
@@ -108,10 +105,11 @@ redthread sync --store ./redthread-store
   `sessions`, key like
   `2026-07-22_short-slug`): what changed, why, validation performed,
   follow-ups.
+- `memory_write` commits and pushes the store for you, so memory reaches
+  other machines without a second step. Check the `sync` field it returns
+  and fix it if it says `failed`.
 - Store durable conventions and decisions under the `notes` namespace;
   never store secrets.
-- Run `redthread sync --store ./redthread-store` (or let the auto-commit
-  daemon handle it) after writing memory, so other machines see it.
 ````
 </div>
 

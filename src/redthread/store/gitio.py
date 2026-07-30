@@ -33,6 +33,52 @@ def init(dest: Path, branch: str = "main") -> None:
     _run(["init", "-q", "-b", branch], cwd=dest)
 
 
+def is_repo(path: Path) -> bool:
+    """True if `path` is a git work tree, or sits inside one. The "inside one"
+    part is deliberate: a project nested in a larger repo should attach to
+    that repo, not quietly get a second one of its own."""
+    result = _run(["rev-parse", "--is-inside-work-tree"], cwd=path, check=False)
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def ensure_repo(path: Path, branch: str = "main") -> bool:
+    """Make `path` a git repo if it isn't one already; returns True if this
+    call created it. Lets a brand-new project become a Redthread host without
+    a separate `git init` step — worktree mode needs a repo to hang the
+    orphan branch off, and requiring one is a pointless stumble on day one.
+    """
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    if is_repo(path):
+        return False
+    # Pin the branch name rather than inheriting init.defaultBranch, for the
+    # same reason store repos do: two machines shouldn't disagree on it.
+    _run(["init", "-q", "-b", branch], cwd=path)
+    return True
+
+
+def commit_paths(repo: Path, message: str, paths: list[str]) -> bool:
+    """Stage and commit only `paths`, leaving the rest of the index and work
+    tree untouched. Returns False if none of them exist or none had changes.
+
+    A pathspec commit, not `add -A` + `commit`: this runs inside the user's
+    own code repo, where sweeping up whatever else they had staged would be
+    an unforgivable thing for a memory tool to do.
+    """
+    repo = Path(repo)
+    existing = [p for p in paths if (repo / p).exists()]
+    if not existing:
+        return False
+    _run(["add", "--", *existing], cwd=repo)
+    if (
+        _run(["diff", "--cached", "--quiet", "--", *existing], cwd=repo, check=False).returncode
+        == 0
+    ):
+        return False  # already committed, nothing to do
+    _run(["commit", "-q", "-m", message, "--", *existing], cwd=repo)
+    return True
+
+
 def clone(remote: str, dest: Path, branch: str | None = None) -> None:
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -146,9 +192,29 @@ def push(repo: Path, remote: str = "origin") -> subprocess.CompletedProcess:
     return _run(["push", "-q", "-u", remote, branch], cwd=repo, check=False)
 
 
-def sync(
-    repo: Path, message: str, remote: str = "origin", max_retries: int = 5
-) -> bool:
+def sync_report(repo: Path, message: str, remote: str = "origin") -> dict[str, str]:
+    """`sync`, but as a status a caller can hand back to an agent instead of
+    an exception. Used where the write itself already succeeded and a failed
+    push must be reported, not raised — losing the write to a git error
+    (no identity configured, no network, a remote that rejects) would be a
+    much worse outcome than an unpushed one.
+    """
+    repo = Path(repo)
+    try:
+        changed = sync(repo, message, remote=remote)
+    except (GitError, OSError) as e:
+        return {"status": "failed", "detail": str(e)}
+    if not has_remote(repo, remote):
+        return {
+            "status": "committed" if changed else "no_changes",
+            "detail": f"no {remote!r} remote on the store repo, so nothing left this "
+            "machine — add one with `git -C <store> remote add origin <url>` to make "
+            "memory portable",
+        }
+    return {"status": "pushed" if changed else "no_changes"}
+
+
+def sync(repo: Path, message: str, remote: str = "origin", max_retries: int = 5) -> bool:
     """Commit local changes if any, then rebase onto and push to `remote`,
     retrying if another node pushed first. Returns True if anything was
     committed or pushed."""

@@ -1,9 +1,10 @@
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from redthread.mcp import tools
-from redthread.store import LocalStore, StoreError
+from redthread.store import LocalStore, StoreError, gitio
 
 
 def _store(tmp_path):
@@ -259,3 +260,64 @@ def test_agents_md_bootstrap_is_idempotent(tmp_path):
     second = tools.agents_md_bootstrap(tmp_path / "store", project_dir)
     assert second == {"status": "already_present", "file": str(project_dir / "AGENTS.md")}
     assert (project_dir / "AGENTS.md").read_text(encoding="utf-8") == text_after_first
+
+
+def _remote_store(tmp_path):
+    """A store wired to a bare remote, with a git identity — i.e. the shape a
+    real store has once `redthread sync` has been set up."""
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
+    store = _store(tmp_path)
+    gitio.configure_identity(store.layout.root, "Test", "test@example.com")
+    gitio.set_remote(store.layout.root, str(remote))
+    return store, remote
+
+
+def test_memory_write_pushes_to_the_remote_by_default(tmp_path):
+    store, remote = _remote_store(tmp_path)
+
+    written = tools.memory_write(store, "notes", "uv.md", "Use uv.", description="Toolchain")
+
+    assert written["sync"] == {"status": "pushed"}
+    # Present on the remote, not just committed locally.
+    listed = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", "main"],
+        cwd=remote,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "memory/notes/uv.md" in listed
+
+
+def test_memory_write_with_push_false_leaves_the_entry_uncommitted(tmp_path):
+    store, _ = _remote_store(tmp_path)
+
+    written = tools.memory_write(store, "notes", "uv.md", "Use uv.", push=False)
+
+    assert written["sync"] == {"status": "skipped"}
+    assert gitio.is_dirty(store.layout.root)
+
+
+def test_memory_write_reports_a_failed_push_without_losing_the_entry(tmp_path):
+    store, _ = _remote_store(tmp_path)
+    gitio.set_remote(store.layout.root, str(tmp_path / "does-not-exist.git"))
+
+    written = tools.memory_write(store, "notes", "uv.md", "Use uv.")
+
+    assert written["sync"]["status"] == "failed"
+    assert written["sync"]["detail"]
+    assert "failed" in written["_next"]
+    # The point of not raising: the entry is still readable.
+    assert tools.memory_read(store, "notes", "uv.md") == "Use uv."
+
+
+def test_memory_write_without_a_remote_says_it_never_left_this_machine(tmp_path):
+    store = _store(tmp_path)
+    gitio.configure_identity(store.layout.root, "Test", "test@example.com")
+
+    written = tools.memory_write(store, "notes", "uv.md", "Use uv.")
+
+    assert written["sync"]["status"] == "committed"
+    assert "remote" in written["sync"]["detail"]
+    assert not gitio.is_dirty(store.layout.root)

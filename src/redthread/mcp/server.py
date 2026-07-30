@@ -35,7 +35,8 @@ def build_server(
             "newest active run. Phases come from this store's own declared "
             "pipeline. Read handoffs, not raw entries, when picking up "
             "another phase's work. Write memory before you finish, not after "
-            "you're asked."
+            "you're asked — memory_write commits and pushes the store for "
+            "you, so no separate sync step is needed."
         ),
     )
 
@@ -187,6 +188,7 @@ def build_server(
         content: str,
         description: str | None = None,
         tags: list[str] | None = None,
+        push: bool = True,
     ) -> dict[str, Any]:
         """Write a long-term memory file (not tied to any run), portable
         across every machine that clones this store. Always pass a one-line
@@ -194,9 +196,16 @@ def build_server(
         one is far less likely to be read again. Conventions and decisions go
         under namespace `notes`; dated session summaries under `sessions`
         (key `YYYY-MM-DD_short-slug`). Never write secrets: the store is a
-        git repo, usually pushed to a shared remote."""
+        git repo, usually pushed to a shared remote.
+
+        The store is committed and pushed automatically; the returned `sync`
+        field says what happened (`pushed`, `committed`, `no_changes`, or
+        `failed` with a `detail`). A failed push never loses the entry — it
+        is already on disk — but do report it rather than assuming the
+        memory travelled. Pass push=False only to batch several writes and
+        sync once at the end."""
         return tools.memory_write(
-            _store(), namespace, key, content, description=description, tags=tags
+            _store(), namespace, key, content, description=description, tags=tags, push=push
         )
 
     @mcp.tool()

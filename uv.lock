@@ -1219,7 +1219,7 @@ wheels = [
 
 [[package]]
 name = "redthread"
-version = "0.5.0"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "mcp" },
@@ -1243,7 +1243,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mcp", specifier = ">=1.28.1" },
+    { name = "mcp", specifier = ">=1.28.1,<2" },
     { name = "platformdirs", specifier = ">=4.0" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "python-pptx", specifier = ">=1.0.2" },

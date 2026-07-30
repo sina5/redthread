@@ -50,6 +50,49 @@ def write_host_config(host_repo: Path, config: HostConfig) -> None:
     )
 
 
+def ensure_ignored(host_repo: Path, store_path: Path) -> bool:
+    """Add the store directory to the host repo's `.gitignore` if it lives
+    inside the host repo's working tree. Returns True if a line was added.
+
+    Without this, a worktree-mode store shows up as a mountain of untracked
+    files in `git status` for the repo it's meant to sit quietly beside.
+    """
+    host_repo = Path(host_repo).resolve()
+    try:
+        rel = Path(store_path).resolve().relative_to(host_repo)
+    except ValueError:
+        return False  # store lives outside the host repo; nothing to ignore
+    entry = rel.as_posix().rstrip("/") + "/"
+    gitignore = host_repo / ".gitignore"
+    existing = gitignore.read_text(encoding="utf-8-sig") if gitignore.exists() else ""
+    if entry in {line.strip() for line in existing.splitlines()}:
+        return False
+    prefix = existing if existing.endswith("\n") or not existing else existing + "\n"
+    gitignore.write_text(prefix + entry + "\n", encoding="utf-8", newline="\n")
+    return True
+
+
+def publish_marker(host_repo: Path, store_path: Path) -> dict[str, object]:
+    """Ignore the store directory and commit `.redthread.yaml` (plus that
+    `.gitignore` change) to the host repo's current branch — and nothing
+    else, so the user's own staged work is never swept into it.
+
+    This is what makes the marker do its job: a marker that only exists in
+    someone's working tree can't tell the *next* clone where the store is.
+    Committing is best-effort — the store already exists by this point, so a
+    repo with no configured git identity should produce a warning to act on,
+    not a failed init.
+    """
+    host_repo = Path(host_repo)
+    ignored = ensure_ignored(host_repo, store_path)
+    paths = [MARKER_FILENAME] + ([".gitignore"] if ignored else [])
+    try:
+        committed = gitio.commit_paths(host_repo, "Set up Redthread memory store", paths)
+    except (gitio.GitError, OSError) as e:
+        return {"ignored": ignored, "committed": False, "detail": str(e)}
+    return {"ignored": ignored, "committed": committed, "detail": None}
+
+
 def attach(host_repo: Path, store_path: Path, *, allow_clone: bool = False) -> HostConfig:
     """Make `store_path` exist, per the marker in `host_repo`. Worktree mode
     always attaches freely (it's just the repo you already cloned). Repo

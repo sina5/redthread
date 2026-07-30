@@ -80,8 +80,9 @@ own access control or lifecycle.
 
 From a small marker, `.redthread.yaml`, committed in the code repo next to
 `AGENTS.md` — it records the mode, path, and branch (or remote URL).
-`redthread init --worktree-repo` writes it automatically; `redthread
-mcp-serve` reads it and attaches the store itself the first time a tool
+`redthread init --worktree-repo` writes *and commits* it automatically
+(along with a `.gitignore` entry for the store directory, and a `git init`
+of the host repo if it needs one); `redthread mcp-serve` reads it and attaches the store itself the first time a tool
 needs it, so a second machine only has to clone the code repo and
 register the same MCP command — no flags to remember. Worktree mode
 attaches freely; a repo-mode store needs `--allow-clone` to auto-clone,
