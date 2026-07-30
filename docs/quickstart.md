@@ -40,7 +40,7 @@ redthread init my-project --phases build,test,present --store ./my-store
     ```
 
     Verify with `/mcp` inside Claude Code — `redthread` should show as
-    connected with 15 tools.
+    connected with 17 tools.
 
 === "⚫ Cursor"
 

@@ -41,17 +41,20 @@ def test_agent_memory_and_context_visible_on_fresh_clone(tmp_path):
     # exact functions the MCP tools delegate to.
     tools.memory_write(store_a, "agent", "preferences.md", "Use uv, never conda.")
     run_id = tools.run_start(store_a)["run_id"]
-    tools.context_log(store_a, run_id, "build", "decision", payload={"note": "chose approach X"})
+    tools.context_log(store_a, "build", "decision", payload={"note": "chose approach X"})
     gitio.sync(store_a.layout.root, "agent memory + context from node A")
 
     # A completely fresh clone on a "new server" — nothing shared but git.
     store_b = _clone(remote, tmp_path, "clone-b")
 
     assert tools.memory_read(store_b, "agent", "preferences.md") == "Use uv, never conda."
-    assert tools.memory_list(store_b, "agent") == ["preferences.md"]
+    assert [i["key"] for i in tools.memory_list(store_b, "agent")] == ["preferences.md"]
 
-    entries = tools.context_read(store_b, run_id, phase="build")
-    assert entries[0]["payload"] == {"note": "chose approach X"}
+    # The run stays active across the clone, so the fresh node resolves the
+    # same run_id without being told it.
+    read = tools.context_read(store_b, phase="build")
+    assert read["run_id"] == run_id
+    assert read["entries"][0]["payload"] == {"note": "chose approach X"}
 
 
 def test_memory_namespaces_are_independent_and_survive_sync_both_ways(tmp_path):
@@ -71,4 +74,4 @@ def test_memory_namespaces_are_independent_and_survive_sync_both_ways(tmp_path):
 
     gitio.pull_rebase(store_a.layout.root)
     assert tools.memory_read(store_a, "node-b-notes", "b.md") == "from B"
-    assert tools.memory_list(store_a, "node-a-notes") == ["a.md"]
+    assert [i["key"] for i in tools.memory_list(store_a, "node-a-notes")] == ["a.md"]

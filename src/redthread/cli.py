@@ -9,6 +9,7 @@ import typer
 
 from redthread import hostconfig
 from redthread.adapters.present import run_present
+from redthread.mcp import tools as mcp_tools
 from redthread.mcp.server import main as run_mcp_server
 from redthread.models import Handoff
 from redthread.paths import PathsMap
@@ -320,11 +321,23 @@ def memory_write(
     namespace: str,
     key: str,
     file: Annotated[Path, typer.Argument(help="File whose content becomes the memory entry")],
+    description: Annotated[
+        str | None,
+        typer.Option(help="One-line summary, stored as frontmatter and shown by `memory list`"),
+    ] = None,
+    tags: Annotated[str, typer.Option(help="Comma-separated tags")] = "",
     store: StoreOpt = Path("./redthread-store"),
 ) -> None:
     s = _open(store)
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
     try:
-        s.memory_write(namespace, key, file.read_text(encoding="utf-8-sig"))
+        s.memory_write(
+            namespace,
+            key,
+            file.read_text(encoding="utf-8-sig"),
+            description=description,
+            tags=tag_list,
+        )
     except (StoreError, ValueError) as e:
         _fail(e)
 
@@ -342,14 +355,47 @@ def memory_read(namespace: str, key: str, store: StoreOpt = Path("./redthread-st
 
 
 @memory_app.command("list")
-def memory_list(namespace: str, store: StoreOpt = Path("./redthread-store")) -> None:
+def memory_list(
+    namespace: Annotated[str | None, typer.Argument(help="Omit to span every namespace")] = None,
+    store: StoreOpt = Path("./redthread-store"),
+) -> None:
+    """List memory entries with their one-line descriptions."""
     s = _open(store)
     try:
-        keys = s.memory_list(namespace)
+        index = s.memory_index(namespace)
     except ValueError as e:
         _fail(e)
-    for key in keys:
-        typer.echo(key)
+    for item in index:
+        typer.echo(f"{item['namespace']}/{item['key']}\t{item['description'] or ''}")
+
+
+@memory_app.command("search")
+def memory_search(
+    query: str,
+    namespace: Annotated[str | None, typer.Option(help="Limit to one namespace")] = None,
+    limit: Annotated[int, typer.Option(help="Maximum hits to return")] = 20,
+    store: StoreOpt = Path("./redthread-store"),
+) -> None:
+    """Search memory keys, descriptions, tags, and bodies for a substring."""
+    s = _open(store)
+    try:
+        hits = s.memory_search(query, namespace=namespace, limit=limit)
+    except ValueError as e:
+        _fail(e)
+    for hit in hits:
+        typer.echo(f"{hit['namespace']}/{hit['key']}\t{hit['match'] or hit['description'] or ''}")
+
+
+@app.command()
+def bootstrap(store: StoreOpt = Path("./redthread-store")) -> None:
+    """Print the same orientation payload the MCP `context_bootstrap` tool
+    returns: pipeline, recent runs, handoffs, and the memory index."""
+    s = _open(store)
+    try:
+        payload = mcp_tools.context_bootstrap(s)
+    except StoreError as e:
+        _fail(e)
+    typer.echo(json.dumps(payload, indent=2))
 
 
 @app.command()

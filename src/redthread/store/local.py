@@ -15,6 +15,7 @@ from typing import Any
 
 import yaml
 
+from redthread import memory_doc
 from redthread.blobs.base import BlobBackend
 from redthread.hashing import sha256_file
 from redthread.ids import get_node_id, new_ulid
@@ -48,7 +49,12 @@ class LocalStore:
     def __init__(self, root: Path):
         self.layout = StoreLayout(Path(root))
         if not self.layout.project_yaml.exists():
-            raise StoreError(f"no Redthread store at {root} (missing project.yaml)")
+            raise StoreError(
+                f"no Redthread store at {root} (missing project.yaml) — create one with "
+                "the store_init tool (or `redthread init`), or check that the --store "
+                "path is right; if another machine already made it, `redthread attach` "
+                "recreates it from the committed .redthread.yaml marker"
+            )
         self.manifest = ProjectManifest.model_validate(
             yaml.safe_load(self.layout.project_yaml.read_text(encoding="utf-8"))
         )
@@ -67,7 +73,10 @@ class LocalStore:
         root = Path(root)
         layout = StoreLayout(root)
         if layout.project_yaml.exists():
-            raise StoreError(f"a Redthread store already exists at {root}")
+            raise StoreError(
+                f"a Redthread store already exists at {root} — open it instead of "
+                "re-initializing (the store_init tool does this for you)"
+            )
         cls._write_initial_files(layout, project_id, phases, name)
         if not (root / ".git").exists():
             # Pin the branch name explicitly: relying on the ambient
@@ -168,7 +177,10 @@ class LocalStore:
     def get_run(self, run_id: str) -> RunRecord:
         path = self.layout.run_yaml(run_id)
         if not path.exists():
-            raise StoreError(f"unknown run {run_id!r}")
+            raise StoreError(
+                f"unknown run {run_id!r} in this store — run_list shows every run_id, "
+                "run_start creates a new one, or omit run_id to use the newest active run"
+            )
         return RunRecord.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
 
     def save_run(self, record: RunRecord) -> None:
@@ -178,6 +190,23 @@ class LocalStore:
         if not self.layout.runs_dir.exists():
             return []
         return sorted(p.name for p in self.layout.runs_dir.iterdir() if p.is_dir())
+
+    def current_run_id(self) -> str | None:
+        """The newest run still marked ``active``, or None if there is none.
+
+        Lets callers omit ``run_id`` in the overwhelmingly common case of one
+        run in flight, without giving up the explicit id that makes
+        concurrent runs across nodes unambiguous. Run ids are ULIDs, so
+        ``list_runs`` is already in creation order.
+        """
+        for run_id in reversed(self.list_runs()):
+            try:
+                record = self.get_run(run_id)
+            except StoreError:
+                continue  # a half-written run dir shouldn't hide older valid ones
+            if record.status == "active":
+                return run_id
+        return None
 
     def add_phase(self, phase: str, *, backfill_open_runs: bool = True) -> ProjectManifest:
         """Append a new phase to the project's declared pipeline.
@@ -190,7 +219,10 @@ class LocalStore:
         left untouched — their status dict is a historical record.
         """
         if phase in self.manifest.phases:
-            raise StoreError(f"phase {phase!r} is already in this project's pipeline")
+            raise StoreError(
+                f"phase {phase!r} is already in this project's pipeline "
+                f"{self.manifest.phases} — nothing to add"
+            )
         updated = ProjectManifest(
             project_id=self.manifest.project_id,
             name=self.manifest.name,
@@ -213,7 +245,9 @@ class LocalStore:
     def _check_phase(self, phase: str) -> None:
         if phase not in self.manifest.phases:
             raise StoreError(
-                f"phase {phase!r} is not in this project's pipeline {self.manifest.phases}"
+                f"phase {phase!r} is not in this project's pipeline {self.manifest.phases} "
+                "— use one of those, or extend the pipeline with `redthread project "
+                "add-phase`"
             )
 
     # ---- entries ---------------------------------------------------------
@@ -289,8 +323,16 @@ class LocalStore:
 
     # ---- long-term agent memory (not run-scoped) --------------------------
 
-    def memory_write(self, namespace: str, key: str, content: str) -> None:
-        _write_text(self.layout.memory_file(namespace, key), content)
+    def memory_write(
+        self,
+        namespace: str,
+        key: str,
+        content: str,
+        description: str | None = None,
+        tags: list[str] | None = None,
+    ) -> None:
+        text = memory_doc.with_frontmatter(content, description=description, tags=tags)
+        _write_text(self.layout.memory_file(namespace, key), text)
 
     def memory_read(self, namespace: str, key: str) -> str | None:
         path = self.layout.memory_file(namespace, key)
@@ -301,6 +343,71 @@ class LocalStore:
         if not base.exists():
             return []
         return sorted(p.relative_to(base).as_posix() for p in base.rglob("*") if p.is_file())
+
+    def memory_namespaces(self) -> list[str]:
+        base = self.layout.root / "memory"
+        if not base.exists():
+            return []
+        return sorted(p.name for p in base.iterdir() if p.is_dir())
+
+    def memory_index(self, namespace: str | None = None) -> list[dict[str, Any]]:
+        """Every memory entry with a one-line description, so a caller can
+        tell what's worth reading without opening each file. Spans every
+        namespace unless one is named."""
+        namespaces = [namespace] if namespace else self.memory_namespaces()
+        index: list[dict[str, Any]] = []
+        for ns in namespaces:
+            base = self.layout.memory_dir(ns)
+            if not base.exists():
+                continue
+            for path in sorted(p for p in base.rglob("*") if p.is_file()):
+                text = self._read_memory_text(path)
+                index.append(
+                    {
+                        "namespace": ns,
+                        "key": path.relative_to(base).as_posix(),
+                        "description": memory_doc.describe(text),
+                        "tags": memory_doc.tags_of(text),
+                        "size_bytes": path.stat().st_size,
+                    }
+                )
+        return index
+
+    def memory_search(
+        self, query: str, namespace: str | None = None, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Case-insensitive substring search over memory keys, descriptions,
+        tags, and bodies. Each hit carries the line that matched, so a caller
+        can judge relevance before spending a `memory_read` on it."""
+        needle = query.strip().lower()
+        if not needle:
+            return []
+        hits: list[dict[str, Any]] = []
+        for item in self.memory_index(namespace):
+            path = self.layout.memory_file(item["namespace"], item["key"])
+            text = self._read_memory_text(path)
+            haystacks = (item["key"], item["description"] or "", " ".join(item["tags"]))
+            in_meta = any(needle in h.lower() for h in haystacks)
+            # Match against the body only: the frontmatter's own
+            # `description:`/`tags:` lines are already reported as fields, so
+            # echoing them back as "the line that matched" is noise.
+            _, body = memory_doc.split(text)
+            match_line = next(
+                (line.strip() for line in body.splitlines() if needle in line.lower()), None
+            )
+            if not in_meta and match_line is None:
+                continue
+            hits.append({**item, "match": match_line})
+            if len(hits) >= limit:
+                break
+        return hits
+
+    @staticmethod
+    def _read_memory_text(path: Path) -> str:
+        # Memory entries are written as UTF-8, but a store is a git repo that
+        # humans edit too; a stray non-UTF-8 byte should degrade one
+        # description, not break listing the whole namespace.
+        return path.read_text(encoding="utf-8", errors="replace")
 
     # ---- handoff ---------------------------------------------------------
 
@@ -314,7 +421,10 @@ class LocalStore:
         self._check_phase(phase)
         path = self.layout.handoff_json(run_id, phase)
         if not path.exists():
-            raise StoreError(f"phase {phase!r} of run {run_id} has not published a handoff")
+            raise StoreError(
+                f"phase {phase!r} of run {run_id} has not published a handoff yet — read "
+                "its rolling summary with summary_get, or the raw log with context_read"
+            )
         return Handoff.model_validate_json(path.read_text(encoding="utf-8"))
 
     # ---- artifacts ----------------------------------------------------------
@@ -334,7 +444,10 @@ class LocalStore:
         self.get_run(run_id)
         source = Path(source)
         if not source.is_file():
-            raise StoreError(f"artifact source {source} is not a file")
+            raise StoreError(
+                f"artifact source {source} is not a file — pass a path to an existing "
+                "file (directories are not supported; archive them first)"
+            )
         artifact_id = artifact_id or source.stem
         dest = self.layout.artifacts_dir(run_id, phase) / (artifact_id + source.suffix)
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -350,7 +463,10 @@ class LocalStore:
         )
         index = self.get_artifact_index(run_id)
         if artifact.artifact_id in index.artifacts:
-            raise StoreError(f"artifact id {artifact.artifact_id!r} already exists in run {run_id}")
+            raise StoreError(
+                f"artifact id {artifact.artifact_id!r} already exists in run {run_id} — "
+                "artifacts are immutable; pass a different artifact_id"
+            )
         index.artifacts[artifact.artifact_id] = artifact
         _write_text(self.layout.artifacts_index(run_id), index.model_dump_json(indent=2))
         self.log(
@@ -364,7 +480,10 @@ class LocalStore:
     def get_artifact_index(self, run_id: str) -> ArtifactIndex:
         path = self.layout.artifacts_index(run_id)
         if not path.exists():
-            raise StoreError(f"unknown run {run_id!r}")
+            raise StoreError(
+                f"unknown run {run_id!r} — run_list shows every run_id (a run created "
+                "before this store tracked artifacts has no index yet)"
+            )
         return ArtifactIndex.model_validate_json(path.read_text(encoding="utf-8"))
 
     def add_blob_artifact(
@@ -387,11 +506,17 @@ class LocalStore:
         self.get_run(run_id)
         source = Path(source)
         if not source.is_file():
-            raise StoreError(f"artifact source {source} is not a file")
+            raise StoreError(
+                f"artifact source {source} is not a file — pass a path to an existing "
+                "file (directories are not supported; archive them first)"
+            )
         artifact_id = artifact_id or source.stem
         index = self.get_artifact_index(run_id)
         if artifact_id in index.artifacts:
-            raise StoreError(f"artifact id {artifact_id!r} already exists in run {run_id}")
+            raise StoreError(
+                f"artifact id {artifact_id!r} already exists in run {run_id} — "
+                "artifacts are immutable; pass a different artifact_id"
+            )
         digest = backend.put(source)
         artifact = Artifact(
             artifact_id=artifact_id,
@@ -428,14 +553,25 @@ class LocalStore:
         """
         index = self.get_artifact_index(run_id)
         if artifact_id not in index.artifacts:
-            raise StoreError(f"unknown artifact {artifact_id!r} in run {run_id}")
+            known = ", ".join(sorted(index.artifacts)) or "none registered yet"
+            raise StoreError(
+                f"unknown artifact {artifact_id!r} in run {run_id} — known ids: {known}"
+            )
         artifact = index.artifacts[artifact_id]
         if artifact.backend == "inline":
             path = self.layout.root / Path(*artifact.uri.split("/"))
             if not path.exists():
-                raise StoreError(f"inline artifact missing from store: {artifact.uri}")
+                raise StoreError(
+                    f"inline artifact missing from store: {artifact.uri} — the pointer is "
+                    "committed but the bytes aren't here; `redthread sync` pulls whatever "
+                    "another machine has already pushed"
+                )
             if sha256_file(path) != artifact.sha256:
-                raise StoreError(f"artifact {artifact_id!r} failed sha256 verification")
+                raise StoreError(
+                    f"artifact {artifact_id!r} failed sha256 verification — the file in the "
+                    "store no longer matches its recorded digest; do not trust it, and "
+                    "re-register it from a known-good source"
+                )
             return artifact, path
 
         backend_name = artifact.uri.split("://", 1)[1].split("/", 1)[0]
