@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.6] - 2026-07-30
 
 ### Added
 
@@ -56,6 +56,12 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Pin `mcp>=1.28.1,<2`. The MCP SDK's 2.0 release (implementing spec
+  revision `2026-07-28`) removes `mcp.server.fastmcp`, which this server is
+  built on, so an unbounded range broke every fresh dependency resolve —
+  CI, and `uvx redthread` for anyone installing from PyPI. Verified against
+  1.29.0, the newest release the pin allows. Migrating to the 2.0 SDK is
+  tracked separately.
 - MCP server tests no longer fall back to `Path.cwd()` for `host_repo`,
   which made them attach to the developer's own `.redthread.yaml` store
   instead of the temporary one under test.

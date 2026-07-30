@@ -17,7 +17,6 @@ build/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
-uv.lock
 
 # mkdocs build output
 site/

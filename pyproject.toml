@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "redthread"
-version = "0.5.0"
+version = "0.6.0"
 description = "Portable, cross-phase managed memory for agentic workflows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,7 +17,11 @@ dependencies = [
     "pyyaml>=6.0",
     "platformdirs>=4.0",
     "python-pptx>=1.0.2",
-    "mcp>=1.28.1",
+    # Pinned below 2.0: the SDK's 2.0 rewrite (for MCP spec 2026-07-28)
+    # removes mcp.server.fastmcp, which this server is built on. Migrating is
+    # tracked separately — until then an unbounded range breaks every fresh
+    # resolve, including CI and `uvx redthread`.
+    "mcp>=1.28.1,<2",
 ]
 
 [project.scripts]
