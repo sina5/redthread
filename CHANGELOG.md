@@ -2,6 +2,42 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.7] - 2026-07-30
+
+### Changed
+
+- **Writing memory now publishes it.** `memory_write` (MCP tool and
+  `redthread memory write`) commits and pushes the store by default,
+  instead of leaving the entry uncommitted and telling the caller to run
+  `redthread sync` — an agent that has to remember a second call sometimes
+  won't, and unpushed memory is invisible to the next machine. The tool
+  result gains a `sync` field (`pushed`, `committed`, `no_changes`, or
+  `failed` with a `detail`); a failed push is reported there rather than
+  raised, since the entry is already on disk. Pass `push=False`
+  (`--no-push` on the CLI) to batch several writes and sync once.
+- **`redthread init --worktree-repo` now finishes the setup.** It `git
+  init`s the host repo if it isn't one yet, adds the store directory to the
+  host repo's `.gitignore`, and commits `.redthread.yaml` to the branch
+  you're on — the three manual steps the docs used to list after `init`. A
+  brand-new project directory becomes a Redthread host in one command, and
+  the marker is committed, which is the only state in which it can do its
+  job of telling the *next* clone where the store is. The commit is a
+  pathspec commit touching those two files only, so anything else you had
+  staged is left alone; pass `--no-commit-marker` to opt out. A commit that
+  fails (no git identity, say) is a warning, not a failed init.
+- `agents_md_bootstrap`, the MCP server instructions, and
+  `context_bootstrap`'s `_next` now say memory is pushed on write, so
+  agents stop being told to sync separately.
+
+### Added
+
+- `gitio.sync_report` — `sync` as a reportable status dict rather than an
+  exception, for callers whose own write already succeeded.
+- `gitio.is_repo`, `gitio.ensure_repo`, `gitio.commit_paths`, and
+  `hostconfig.ensure_ignored`/`hostconfig.publish_marker`.
+- `LocalStore.marker_status`, recording what `init`/`init_worktree` did
+  with the host repo's marker commit.
+
 ## [0.6] - 2026-07-30
 
 ### Added

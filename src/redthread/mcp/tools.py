@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from redthread.models import Handoff
-from redthread.store import LocalStore, StoreError
+from redthread.store import LocalStore, StoreError, gitio
 
 
 def resolve_run_id(store: LocalStore, run_id: str | None) -> str:
@@ -108,7 +108,8 @@ def _bootstrap_next(run_id: str | None, memory: list[dict[str, Any]]) -> str:
         steps.append(f"run {run_id} is active, so run_id can be omitted from later calls")
     steps.append(
         "before finishing, record what you did with memory_write "
-        "(namespace `sessions`, key `YYYY-MM-DD_short-slug`)"
+        "(namespace `sessions`, key `YYYY-MM-DD_short-slug`), which commits and "
+        "pushes the store for you"
     )
     return "; ".join(steps) + "."
 
@@ -218,6 +219,20 @@ def handoff_get(store: LocalStore, phase: str, run_id: str | None = None) -> dic
     return store.get_handoff(run_id, phase).model_dump(mode="json")
 
 
+_PUSH_NEXT = {
+    "pushed": "Memory is written and pushed — other machines get it on their next sync.",
+    "committed": "Memory is written and committed locally, but the store has no remote, "
+    "so it hasn't left this machine yet.",
+    "no_changes": "Memory is written; git reported nothing new to push (the content was "
+    "already committed, most likely by the auto-commit daemon).",
+    "failed": "Memory is written to disk but the push failed — it is safe locally and "
+    "nothing was lost, but it will not reach other machines until this is resolved. "
+    "Fix the cause below and re-run `redthread sync --store <store>`.",
+    "skipped": "Memory is written but not pushed (push=False); `redthread sync` "
+    "publishes it to other machines when you're ready.",
+}
+
+
 def memory_write(
     store: LocalStore,
     namespace: str,
@@ -225,15 +240,29 @@ def memory_write(
     content: str,
     description: str | None = None,
     tags: list[str] | None = None,
+    push: bool = True,
 ) -> dict[str, Any]:
+    """Write a memory entry and, by default, commit+push the store.
+
+    Pushing is the default because an unpushed memory is invisible to the
+    next machine, which is the whole point of the store — and an agent that
+    has to remember a second call will sometimes not make it. A failed push
+    is reported in the result rather than raised: the entry is already on
+    disk, and turning that into an exception would tell the caller its write
+    failed when it didn't.
+    """
     store.memory_write(namespace, key, content, description=description, tags=tags)
-    return {
-        "namespace": namespace,
-        "key": key,
-        "description": description,
-        "_next": "Memory is written but not yet pushed; `redthread sync` publishes it "
-        "to other machines (the auto-commit daemon does this for you if it's running).",
-    }
+    result: dict[str, Any] = {"namespace": namespace, "key": key, "description": description}
+    if push:
+        sync = gitio.sync_report(store.layout.root, f"redthread: memory {namespace}/{key}")
+    else:
+        sync = {"status": "skipped"}
+    result["sync"] = sync
+    next_text = _PUSH_NEXT[sync["status"]]
+    if sync.get("detail"):
+        next_text = f"{next_text} ({sync['detail']})"
+    result["_next"] = next_text
+    return result
 
 
 def memory_read(store: LocalStore, namespace: str, key: str) -> str | None:
@@ -266,6 +295,10 @@ def _agents_md_section(store_path: Path) -> str:
         "  `memory_write` (namespace `sessions`, key like `YYYY-MM-DD_short-slug`,\n"
         "  always with a one-line `description`): what changed, why, validation\n"
         "  performed, follow-ups.\n"
+        "- `memory_write` commits and pushes the store for you by default, so\n"
+        "  memory reaches other machines without a second step. Check the `sync`\n"
+        "  field it returns; if it says `failed`, say so and fix it rather than\n"
+        "  leaving the entry stranded on this machine.\n"
         "- Store durable conventions and decisions under the `notes` namespace;\n"
         "  never store secrets.\n"
         "- Subagents do not inherit this file. When you delegate work that should\n"

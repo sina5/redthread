@@ -69,22 +69,65 @@ def init(
             "an MCP server launched from this repo can find the store later"
         ),
     ] = None,
+    commit_marker: Annotated[
+        bool,
+        typer.Option(
+            help="Gitignore the store directory and commit .redthread.yaml to the host "
+            "repo's current branch, so a future clone can find the store"
+        ),
+    ] = True,
 ) -> None:
-    """Create a new Redthread store with a declared phase pipeline."""
+    """Create a new Redthread store with a declared phase pipeline.
+
+    With --worktree-repo, the host repo is `git init`-ed if it isn't a repo
+    yet — so a project you started a minute ago can host memory without any
+    git setup of its own.
+    """
     phase_list = [p.strip() for p in phases.split(",") if p.strip()]
     try:
         if worktree_repo:
-            LocalStore.init_worktree(
-                worktree_repo, store, branch, project_id=project_id, phases=phase_list, name=name
+            created = LocalStore.init_worktree(
+                worktree_repo,
+                store,
+                branch,
+                project_id=project_id,
+                phases=phase_list,
+                name=name,
+                publish_marker=commit_marker,
             )
         else:
-            LocalStore.init(
-                store, project_id=project_id, phases=phase_list, name=name, host_repo=host_repo
+            created = LocalStore.init(
+                store,
+                project_id=project_id,
+                phases=phase_list,
+                name=name,
+                host_repo=host_repo,
+                publish_marker=commit_marker,
             )
     except StoreError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
     typer.echo(f"initialized store at {store} (phases: {', '.join(phase_list)})")
+    _report_marker(created.marker_status)
+
+
+def _report_marker(status: dict[str, object] | None) -> None:
+    """Say what happened to the host repo's marker commit. A failure here is
+    a warning, not an exit code: the store itself is already usable."""
+    if status is None:
+        return
+    if status.get("detail"):
+        typer.secho(
+            f"store created, but committing {hostconfig.MARKER_FILENAME} to the host repo "
+            f"failed: {status['detail']}\ncommit it yourself so other clones can find the "
+            "store",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        return
+    if status.get("committed"):
+        ignored = " (and gitignored the store directory)" if status.get("ignored") else ""
+        typer.echo(f"committed {hostconfig.MARKER_FILENAME} to the host repo{ignored}")
 
 
 project_app = typer.Typer(no_args_is_help=True, help="Manage a project's declared pipeline")
@@ -326,8 +369,10 @@ def memory_write(
         typer.Option(help="One-line summary, stored as frontmatter and shown by `memory list`"),
     ] = None,
     tags: Annotated[str, typer.Option(help="Comma-separated tags")] = "",
+    push: Annotated[bool, typer.Option(help="Commit and push the store after writing")] = True,
     store: StoreOpt = Path("./redthread-store"),
 ) -> None:
+    """Write a memory entry and, unless --no-push, publish it to the store's remote."""
     s = _open(store)
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
     try:
@@ -340,6 +385,18 @@ def memory_write(
         )
     except (StoreError, ValueError) as e:
         _fail(e)
+    if not push:
+        return
+    # The entry is already on disk, so a git failure is a reportable warning,
+    # not a reason to exit nonzero as if the write itself had failed.
+    report = gitio.sync_report(Path(store), f"redthread: memory {namespace}/{key}")
+    detail = report.get("detail")
+    if report["status"] == "failed":
+        typer.secho(f"written, but push failed: {detail}", fg=typer.colors.YELLOW, err=True)
+    elif report["status"] == "pushed":
+        typer.echo("written and pushed")
+    else:
+        typer.echo(f"written ({report['status']}{f': {detail}' if detail else ''})")
 
 
 @memory_app.command("read")

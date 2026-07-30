@@ -56,9 +56,7 @@ def _code_vocabulary(source: str) -> set[str]:
         elif isinstance(node, ast.Attribute):
             found.add(node.attr)
         elif (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and id(node) not in skip
+            isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skip
         ):
             found.add(node.value)
     return found

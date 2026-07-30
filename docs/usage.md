@@ -37,12 +37,26 @@ for the trade-off in full). This is the default the
 [AGENTS.md example](agents-md.md) sets up, since it needs nothing beyond a
 repo you already have.
 
+It needs even less than that on a brand-new project: if `--worktree-repo`
+isn't a git repo yet, `init` runs `git init -b main` on it first, so a
+project directory you created five minutes ago can host memory without any
+git setup of its own.
+
+`init` then finishes the job — it adds the store directory to the host
+repo's `.gitignore` (the store is a worktree, not content of the host
+branch) and commits `.redthread.yaml` to the branch you're on. That commit
+is a pathspec commit touching those two paths only: whatever else you had
+staged stays staged and uncommitted. Pass `--no-commit-marker` if you'd
+rather stage and commit it yourself. If the commit fails — no configured
+git identity, most often — `init` warns and still exits 0, because the
+store itself is created and usable.
+
 ### Finding the store again on another machine
 
 `--worktree-repo` always writes a small marker, `.redthread.yaml`, into the
-host repo recording the mode, path, and branch — commit it, and a second
-machine that just clones the code repo can attach without ever passing
-`--worktree-repo`/`--branch` itself:
+host repo recording the mode, path, and branch — and commits it, so a
+second machine that just clones the code repo can attach without ever
+passing `--worktree-repo`/`--branch` itself:
 
 ```bash
 redthread attach [--store PATH] [--host-repo PATH] [--allow-clone]
@@ -95,7 +109,7 @@ coding agent's MCP config at this instead of its local `.claude`/`.agent`
 folder — the same memory becomes visible on every machine that clones the
 store.
 
-Three conveniences worth knowing before you wire an agent up:
+Four conveniences worth knowing before you wire an agent up:
 
 - **`context_bootstrap` is the front door.** One call returns the phase
   pipeline, recent runs and their status, published handoffs, and the full
@@ -111,6 +125,15 @@ Three conveniences worth knowing before you wire an agent up:
   those descriptions so an agent can tell what's worth opening without
   reading every entry. `memory_search` covers keys, descriptions, tags, and
   bodies.
+- **Writing memory publishes it.** `memory_write` commits and pushes the
+  store by default, because an agent that has to remember a second `sync`
+  call sometimes won't — and unpushed memory is invisible to the next
+  machine, which is the point of the store. The result carries a `sync`
+  field (`pushed`, `committed`, `no_changes`, or `failed` with a `detail`);
+  a failed push is reported there rather than raised, since the entry is
+  already safely on disk. Pass `push=False` to batch several writes and
+  sync once at the end. Same for the CLI: `redthread memory write` pushes
+  unless you pass `--no-push`.
 
 The same reads are also exposed as MCP **resources**, for clients that can
 attach context without spending a tool call: `redthread://project`,
@@ -332,6 +355,9 @@ This project's agent memory lives in a Redthread store (MCP server
   `memory_write` (always with a one-line `description`; namespace
   `sessions`, key like `2026-07-18_short-slug`):
   what changed, why, validation done, follow-ups.
+- `memory_write` commits and pushes the store for you, so memory reaches
+  other machines without a second step. Check the `sync` field it returns
+  and fix it if it says `failed`.
 - Store durable conventions and decisions under the `notes` namespace;
   never store secrets.
 ````
@@ -367,7 +393,7 @@ redthread bootstrap --store ./my-store   # same payload the MCP context_bootstra
 Memory isn't tied to any run — it's the durable half of the store.
 
 ```bash
-redthread memory write <namespace> <key> <file> [--description TEXT] [--tags a,b]
+redthread memory write <namespace> <key> <file> [--description TEXT] [--tags a,b] [--no-push]
 redthread memory read <namespace> <key>
 redthread memory list [namespace]              # key + description per entry
 redthread memory search <query> [--namespace NS] [--limit N]
@@ -376,6 +402,12 @@ redthread memory search <query> [--namespace NS] [--limit N]
 `--description` is stored as YAML frontmatter and is what `memory list`
 shows, so it's worth passing every time — an entry nobody can identify from
 a listing is an entry nobody reads again.
+
+`memory write` commits and pushes the store afterwards, so the entry is on
+the remote as soon as it's written. Pass `--no-push` to write several
+entries and `redthread sync` once at the end. A failed push is a warning,
+not an error: the entry is already on disk, so the command still exits 0
+and tells you to sync once you've fixed the cause.
 
 ```bash
 redthread memory write notes toolchain.md ./note.md \
