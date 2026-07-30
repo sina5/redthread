@@ -2,6 +2,70 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.6] - 2026-07-30
+
+### Added
+
+- `context_bootstrap` MCP tool (and `redthread bootstrap` on the CLI) — one
+  call returning the project's phase pipeline, recent runs with status,
+  published handoffs, and the full memory index, plus a `_next` field
+  saying what to do with it. Replaces the `run_list` → `memory_list` →
+  `handoff_get` chain a cold agent had to guess its way through, and is now
+  the documented first call of every session.
+- Self-describing memory: `memory_write` takes `description` and `tags`,
+  stored as YAML frontmatter (`redthread.memory_doc`), and `memory_list`
+  returns a description per entry instead of bare keys — entries written
+  without one fall back to their first meaningful line. New `memory_search`
+  tool and `redthread memory search` command cover keys, descriptions,
+  tags, and bodies, reporting the line that matched.
+- Read-only MCP **resources** mirroring the read tools, for clients that
+  can attach context without a tool round-trip: `redthread://project`,
+  `redthread://memory`, `redthread://bootstrap`, and templated
+  `redthread://memory/{namespace}/{key}`,
+  `redthread://handoff/{run_id}/{phase}`,
+  `redthread://summary/{run_id}/{phase}`.
+- `LocalStore.current_run_id`, `memory_namespaces`, `memory_index`, and
+  `memory_search`.
+
+### Changed
+
+- **Breaking (MCP tool surface):** run-scoped tools now take `run_id` last
+  and optional. Omitted, it resolves to the store's newest `active` run,
+  and the resolved id is echoed in the response — so an agent can't
+  silently write to the wrong run. Pass it explicitly when several runs are
+  in flight. Tools returning bare scalars now return objects to carry that
+  id: `context_log` → `{entry_id, run_id, phase, type}`, `context_read` →
+  `{run_id, count, entries}`, `summary_get` → `{run_id, phase, markdown}`,
+  `summary_update` → `{run_id, phase, bytes}`.
+- **Breaking (MCP tool surface):** `memory_list` returns
+  `[{namespace, key, description, tags, size_bytes}]` instead of `[key]`,
+  and its `namespace` argument is optional (spans every namespace when
+  omitted). `memory_write` returns a result object rather than nothing.
+  `LocalStore.memory_list` still returns bare keys; the descriptive form is
+  `LocalStore.memory_index`.
+- Store errors now name the call that fixes them — a missing store points
+  at `store_init`, an unknown run at `run_list`, a phase outside the
+  pipeline at `redthread project add-phase`, a missing handoff at
+  `summary_get`/`context_read`, and an unknown artifact lists the ids that
+  do exist.
+- Server `instructions` and the `agents_md_bootstrap` policy now lead with
+  `context_bootstrap` and note that subagents don't inherit the main
+  agent's instructions, so they need to call it themselves.
+- Docs site: Google Analytics, consent-gated so the tag only loads once a
+  visitor accepts.
+
+### Fixed
+
+- Pin `mcp>=1.28.1,<2`. The MCP SDK's 2.0 release (implementing spec
+  revision `2026-07-28`) removes `mcp.server.fastmcp`, which this server is
+  built on, so an unbounded range broke every fresh dependency resolve —
+  CI, and `uvx redthread` for anyone installing from PyPI. Verified against
+  1.29.0, the newest release the pin allows. Migrating to the 2.0 SDK is
+  tracked separately.
+- MCP server tests no longer fall back to `Path.cwd()` for `host_repo`,
+  which made them attach to the developer's own `.redthread.yaml` store
+  instead of the temporary one under test.
+
 ## [0.5] - 2026-07-23
 
 ### Added

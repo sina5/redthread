@@ -15,6 +15,31 @@ exclude_docs: |
 extra_css:
   - stylesheets/extra.css
 
+extra:
+  # Analytics is consent-gated, same as sinafathi.com — the tag only loads
+  # once the visitor accepts. No ads cookie here; these docs carry no ads.
+  consent:
+    title: Cookie Consent
+    description: >-
+      These docs use cookies for traffic analytics (Google Analytics), so I can
+      see which pages actually help people. Everything works the same either
+      way — you can change your preference any time from the footer.
+    cookies:
+      analytics:
+        name: Google Analytics
+        checked: true
+    actions:
+      - manage
+      - accept
+  analytics:
+    provider: google
+    property: G-E83LZ5FTKV
+
+copyright: >
+  Copyright &copy; 2026 <a href="https://sinafathi.com">Sina Fathi-Kazerooni</a> –
+  <a href="https://sinafathi.com/policy/">Privacy Policy</a> –
+  <a href="#__consent">Change cookie settings</a>
+
 theme:
   name: material
   custom_dir: docs/overrides

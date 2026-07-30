@@ -85,14 +85,39 @@ redthread project add-phase deploy --store ./my-store
 redthread mcp-serve [--store PATH] [--host-repo PATH] [--allow-clone]
 ```
 
-Runs an MCP server (stdio) exposing the store as 15 tools: `store_init`,
-`run_start`/`run_list`, `context_log`/`context_read`,
-`artifact_put`/`artifact_get`, `summary_update`/`summary_get`,
-`handoff_publish`/`handoff_get`, `memory_write`/`memory_read`/
-`memory_list` for long-term memory not tied to any run, and
-`agents_md_bootstrap` (below). Point a coding agent's MCP config at this
-instead of its local `.claude`/`.agent` folder — the same memory becomes
-visible on every machine that clones the store.
+Runs an MCP server (stdio) exposing the store as 17 tools:
+`context_bootstrap` (start here), `store_init`, `run_start`/`run_list`,
+`context_log`/`context_read`, `artifact_put`/`artifact_get`,
+`summary_update`/`summary_get`, `handoff_publish`/`handoff_get`,
+`memory_write`/`memory_read`/`memory_list`/`memory_search` for long-term
+memory not tied to any run, and `agents_md_bootstrap` (below). Point a
+coding agent's MCP config at this instead of its local `.claude`/`.agent`
+folder — the same memory becomes visible on every machine that clones the
+store.
+
+Three conveniences worth knowing before you wire an agent up:
+
+- **`context_bootstrap` is the front door.** One call returns the phase
+  pipeline, recent runs and their status, published handoffs, and the full
+  memory index with a description per entry — the orientation a cold agent
+  would otherwise need four or five calls to assemble, and usually skips.
+  `redthread bootstrap --store PATH` prints the same payload for humans.
+- **`run_id` is optional on every run-scoped tool.** Omitted, it resolves
+  to the store's newest `active` run, and the id it resolved to comes back
+  in the response — so an agent is never guessing which run it wrote to.
+  Pass it explicitly when several runs are in flight across machines.
+- **Memory is self-describing.** Pass a one-line `description` to
+  `memory_write` and it's stored as YAML frontmatter; `memory_list` returns
+  those descriptions so an agent can tell what's worth opening without
+  reading every entry. `memory_search` covers keys, descriptions, tags, and
+  bodies.
+
+The same reads are also exposed as MCP **resources**, for clients that can
+attach context without spending a tool call: `redthread://project`,
+`redthread://memory`, `redthread://bootstrap`, and the templated
+`redthread://memory/{namespace}/{key}`,
+`redthread://handoff/{run_id}/{phase}`,
+`redthread://summary/{run_id}/{phase}`.
 
 If `--store` doesn't exist yet but `--host-repo` (defaults to the current
 directory) has a `.redthread.yaml` marker, the first tool call attaches
@@ -135,8 +160,8 @@ Pick your client — each tab is ready to paste as-is.
     your team.
 
     Verify with `/mcp` inside Claude Code — `redthread` should show as
-    connected with 15 tools. A quick smoke test is asking the agent to call
-    `run_list` or `memory_list`.
+    connected with 17 tools. A quick smoke test is asking the agent to call
+    `context_bootstrap`.
 
     To run from a source checkout instead, replace `uvx redthread` with
     `uv run --directory /path/to/checkout redthread`.
@@ -300,10 +325,12 @@ agents won't call memory tools unprompted. Add this to your `AGENTS.md`
 This project's agent memory lives in a Redthread store (MCP server
 "redthread"), not in local files.
 
-- At session start, call `memory_list` / `memory_read` to load relevant
-  context before making changes.
+- At session start, call `context_bootstrap` once — it returns this
+  project's pipeline, recent runs, and the memory index in one call — then
+  `memory_read` whatever looks relevant before making changes.
 - After completing a non-trivial task, write a dated summary with
-  `memory_write` (namespace `sessions`, key like `2026-07-18_short-slug`):
+  `memory_write` (always with a one-line `description`; namespace
+  `sessions`, key like `2026-07-18_short-slug`):
   what changed, why, validation done, follow-ups.
 - Store durable conventions and decisions under the `notes` namespace;
   never store secrets.
@@ -328,9 +355,32 @@ A run is one end-to-end attempt through the pipeline, identified by a ULID.
 |---|---|
 | `redthread run start` | Start a run; prints its `run_id` |
 | `redthread run list` | List all run ids in the store |
+| `redthread bootstrap` | Print the orientation payload: pipeline, recent runs, handoffs, memory index |
 
 ```bash
 run_id=$(redthread run start --store ./my-store)
+redthread bootstrap --store ./my-store   # same payload the MCP context_bootstrap tool returns
+```
+
+## Long-term memory (CLI)
+
+Memory isn't tied to any run — it's the durable half of the store.
+
+```bash
+redthread memory write <namespace> <key> <file> [--description TEXT] [--tags a,b]
+redthread memory read <namespace> <key>
+redthread memory list [namespace]              # key + description per entry
+redthread memory search <query> [--namespace NS] [--limit N]
+```
+
+`--description` is stored as YAML frontmatter and is what `memory list`
+shows, so it's worth passing every time — an entry nobody can identify from
+a listing is an entry nobody reads again.
+
+```bash
+redthread memory write notes toolchain.md ./note.md \
+  --description "Why this project uses uv, not conda" --tags toolchain --store ./my-store
+redthread memory search uv --store ./my-store
 ```
 
 ## Logging context

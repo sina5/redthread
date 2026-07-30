@@ -3,6 +3,7 @@
 AGENTS.md
 CLAUDE.md
 .mcp.json
+.redthread.yaml
 
 # memories-branch worktree (per AGENTS.md git workflow)
 memories-wt/
@@ -16,7 +17,6 @@ build/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
-uv.lock
 
 # mkdocs build output
 site/

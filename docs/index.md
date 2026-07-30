@@ -100,10 +100,12 @@ redthread sync --store ./redthread-store
 
 ### How to use it
 
-- At session start, call `memory_list` / `memory_read` to load relevant
-  context before making changes.
+- At session start, call `context_bootstrap` once — it returns this
+  project's pipeline, recent runs, and the memory index in one call — then
+  `memory_read` whatever looks relevant before making changes.
 - After completing a non-trivial task, write a dated summary with
-  `memory_write` (namespace `sessions`, key like
+  `memory_write` (always with a one-line `description`; namespace
+  `sessions`, key like
   `2026-07-22_short-slug`): what changed, why, validation performed,
   follow-ups.
 - Store durable conventions and decisions under the `notes` namespace;
@@ -150,7 +152,7 @@ redthread init my-project --phases build,test,present --store ./my-store
     ```
 
     Verify with `/mcp` inside Claude Code — `redthread` should show as
-    connected with 15 tools.
+    connected with 17 tools.
 
 === "⚫ Cursor"
 
