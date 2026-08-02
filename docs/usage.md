@@ -345,21 +345,29 @@ agents won't call memory tools unprompted. Add this to your `AGENTS.md`
 ````markdown
 ## Memory (Redthread)
 
-This project's agent memory lives in a Redthread store (MCP server
-"redthread"), not in local files.
+This project's long-term memory is a Redthread store (MCP server
+"redthread") shared by every session, machine, and agent working on it.
+It is the only memory that counts here.
 
 - At session start, call `context_bootstrap` once — it returns this
   project's pipeline, recent runs, and the memory index in one call — then
   `memory_read` whatever looks relevant before making changes.
+- Never record durable knowledge anywhere else: not in the harness's own
+  memory directory (e.g. `~/.claude/projects/**/memory/`), not in a scratch
+  notes file. Those are invisible to other sessions, machines, and agents.
 - After completing a non-trivial task, write a dated summary with
   `memory_write` (always with a one-line `description`; namespace
-  `sessions`, key like `2026-07-18_short-slug`):
-  what changed, why, validation done, follow-ups.
+  `sessions`, key like `2026-07-18_short-slug`): what changed, why,
+  validation done, follow-ups. Write when the task finishes, not batched at
+  the end of the session, and without being asked.
 - `memory_write` commits and pushes the store for you, so memory reaches
   other machines without a second step. Check the `sync` field it returns
   and fix it if it says `failed`.
 - Store durable conventions and decisions under the `notes` namespace;
   never store secrets.
+- If the MCP server isn't connected, use the CLI on the same store rather
+  than skipping memory: `redthread bootstrap`, `redthread memory
+  list|search|read|write ...`.
 ````
 
 Namespaces are free-form — `sessions` and `notes` are just a convention
