@@ -399,6 +399,50 @@ def memory_write(
         typer.echo(f"written ({report['status']}{f': {detail}' if detail else ''})")
 
 
+@memory_app.command("import")
+def memory_import(
+    source: Annotated[Path, typer.Argument(help="File or directory of memory files to port in")],
+    namespace: Annotated[str, typer.Option(help="Namespace to import into")] = "imported",
+    recursive: Annotated[bool, typer.Option(help="Descend into subdirectories")] = True,
+    overwrite: Annotated[bool, typer.Option(help="Replace existing keys that differ")] = False,
+    tags: Annotated[str, typer.Option(help="Comma-separated tags for every imported entry")] = "",
+    push: Annotated[bool, typer.Option(help="Commit and push the store after importing")] = True,
+    store: StoreOpt = Path("./redthread-store"),
+) -> None:
+    """Port existing memory files into this store, one entry per file.
+
+    Copies, never moves. Existing keys are skipped unless --overwrite, and
+    identical content is skipped either way, so re-running is safe."""
+    s = _open(store)
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+    try:
+        report = mcp_tools.memory_import(
+            s,
+            source,
+            namespace=namespace,
+            recursive=recursive,
+            overwrite=overwrite,
+            tags=tag_list,
+            push=push,
+        )
+    except StoreError as e:
+        _fail(e)
+    for key in report["imported"]:
+        typer.echo(f"imported\t{namespace}/{key}")
+    for item in report["skipped"]:
+        typer.echo(f"skipped ({item['reason']})\t{namespace}/{item['key']}")
+    for item in report["failed"]:
+        typer.secho(f"failed\t{item['path']}: {item['error']}", fg=typer.colors.YELLOW, err=True)
+    counts = report["counts"]
+    typer.echo(
+        f"{counts['imported']} imported, {counts['skipped']} skipped, {counts['failed']} failed"
+    )
+    if report["sync"]["status"] == "failed":
+        typer.secho(
+            f"push failed: {report['sync'].get('detail')}", fg=typer.colors.YELLOW, err=True
+        )
+
+
 @memory_app.command("read")
 def memory_read(namespace: str, key: str, store: StoreOpt = Path("./redthread-store")) -> None:
     s = _open(store)

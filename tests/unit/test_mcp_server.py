@@ -61,6 +61,7 @@ def test_all_tools_are_registered(tmp_path):
         "memory_read",
         "memory_list",
         "memory_search",
+        "memory_import",
         "agents_md_bootstrap",
     }
 
@@ -229,6 +230,19 @@ def test_agents_md_bootstrap_through_call_tool(tmp_path):
     assert not result.isError
     assert result.structuredContent["status"] == "created"
     assert (project_dir / "AGENTS.md").exists()
+
+
+def test_memory_import_through_call_tool(tmp_path):
+    store_path = tmp_path / "store"
+    LocalStore.init(store_path, project_id="demo", phases=["build"])
+    source = tmp_path / "old-memory"
+    source.mkdir()
+    (source / "decision.md").write_text("# Chose SQLite\n", encoding="utf-8")
+
+    result = _call(store_path, "memory_import", source=str(source), namespace="ported")
+    assert not result.isError
+    assert result.structuredContent["imported"] == ["decision"]
+    assert tools.memory_read(LocalStore(store_path), "ported", "decision") == "# Chose SQLite\n"
 
 
 def test_tool_call_auto_attaches_worktree_store_from_marker(tmp_path):

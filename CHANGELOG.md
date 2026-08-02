@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.8] - 2026-08-02
+
+### Added
+
+- **Port existing memory into a store.** New `memory_import` MCP tool and
+  `redthread memory import <path>` command: point it at a file or a
+  directory and each text file becomes one memory entry, keyed by its path
+  under the source with the extension dropped, so nesting like
+  `decisions/db.md` survives as `decisions/db`. Most projects meet
+  Redthread with memory already written somewhere else — a harness's own
+  memory directory (`~/.claude/projects/**/memory/`), a notes folder,
+  another store's `memory/` tree — and asking people to re-type it by hand
+  is how it stays where it is.
+  - Entries are copied verbatim, so frontmatter the source already had
+    (`description`, `tags`) keeps working in `memory_list` and
+    `memory_search` with no conversion step.
+  - It is a copy, never a move: source files are left untouched.
+  - Existing keys are skipped rather than clobbered unless
+    `overwrite=True` (`--overwrite`), and a key whose content already
+    matches is skipped either way — re-running an import is cheap and
+    non-destructive.
+  - Unreadable or non-UTF-8 files are reported per-file in `failed`
+    instead of aborting the batch, and the whole import commits and pushes
+    in one commit rather than one per entry.
+  - `--namespace` (default `imported`), `--tags`, `--recursive/--no-recursive`,
+    and `--no-push` are available on both the tool and the CLI.
+- `redthread.memory_port` — `discover` and `key_for` as pure path-walking
+  and key-derivation functions, independent of any store. Hidden files and
+  directories are skipped (a `.git` inside a notes folder is not memory),
+  and a segment that reduces to nothing is dropped rather than emitted as a
+  traversal.
+
 ## [0.7] - 2026-07-30
 
 ### Changed

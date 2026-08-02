@@ -11,6 +11,7 @@ which run it just wrote to.
 from pathlib import Path
 from typing import Any
 
+from redthread import memory_port
 from redthread.models import Handoff
 from redthread.store import LocalStore, StoreError, gitio
 
@@ -265,6 +266,105 @@ def memory_write(
     return result
 
 
+_IMPORT_NEXT_NO_FILES = (
+    "Nothing was imported — no text files found at that path. Check the path, "
+    "and pass recursive=True if the entries are in subdirectories."
+)
+_IMPORT_NEXT_ALL_SKIPPED = (
+    "Nothing was written — every file found is already in this namespace "
+    "(see `skipped`). Pass overwrite=True to replace entries that differ."
+)
+
+
+def memory_import(
+    store: LocalStore,
+    source: str | Path,
+    namespace: str = "imported",
+    recursive: bool = True,
+    overwrite: bool = False,
+    tags: list[str] | None = None,
+    push: bool = True,
+) -> dict[str, Any]:
+    """Copy existing memory files at `source` into `namespace`, one entry
+    per file, then commit+push once for the whole batch.
+
+    Entries are copied verbatim: whatever frontmatter the source already had
+    survives, and `memory_list` derives a description from it (or from the
+    first meaningful line) the same way it does for anything else. This is a
+    copy, never a move — the source files are left untouched, so a bad
+    import costs nothing but a namespace.
+
+    Existing keys are skipped rather than clobbered unless `overwrite`, and
+    a key whose content already matches is skipped either way, so re-running
+    an import is cheap and non-destructive.
+    """
+    source = Path(source).expanduser()
+    if not source.exists():
+        raise StoreError(f"nothing to import: {source} does not exist")
+
+    paths = memory_port.discover(source, recursive=recursive)
+    imported: list[str] = []
+    skipped: list[dict[str, str]] = []
+    failed: list[dict[str, str]] = []
+
+    for path in paths:
+        try:
+            key = memory_port.key_for(path, source)
+            content = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError, ValueError) as e:
+            failed.append({"path": str(path), "error": str(e)})
+            continue
+        try:
+            existing = store.memory_read(namespace, key)
+            if existing is not None:
+                # An unchanged re-import is a no-op even with overwrite on:
+                # rewriting identical bytes only makes noise in the history.
+                if existing == content:
+                    skipped.append({"key": key, "reason": "unchanged"})
+                    continue
+                if not overwrite:
+                    skipped.append({"key": key, "reason": "exists"})
+                    continue
+            store.memory_write(namespace, key, content, tags=tags)
+        except (StoreError, ValueError, OSError) as e:
+            failed.append({"path": str(path), "error": str(e)})
+            continue
+        imported.append(key)
+
+    result: dict[str, Any] = {
+        "source": str(source),
+        "namespace": namespace,
+        "imported": imported,
+        "skipped": skipped,
+        "failed": failed,
+        "counts": {
+            "imported": len(imported),
+            "skipped": len(skipped),
+            "failed": len(failed),
+        },
+    }
+
+    # Nothing written means nothing to publish — a sync here would report
+    # `no_changes` and read like the import half-worked.
+    if not imported:
+        result["sync"] = {"status": "skipped"}
+        result["_next"] = _IMPORT_NEXT_NO_FILES if not paths else _IMPORT_NEXT_ALL_SKIPPED
+        return result
+
+    if push:
+        sync = gitio.sync_report(
+            store.layout.root, f"redthread: import {len(imported)} entries into {namespace}"
+        )
+    else:
+        sync = {"status": "skipped"}
+    result["sync"] = sync
+    next_text = _PUSH_NEXT[sync["status"]]
+    if sync.get("detail"):
+        next_text = f"{next_text} ({sync['detail']})"
+    result["_next"] = next_text
+    return result
+
+
 def memory_read(store: LocalStore, namespace: str, key: str) -> str | None:
     return store.memory_read(namespace, key)
 
@@ -286,21 +386,30 @@ def _agents_md_section(store_path: Path) -> str:
     return (
         f"{_AGENTS_MD_MARKER}\n"
         "## Agent memory (Redthread)\n\n"
-        "This project's agent memory lives in a Redthread store (MCP server "
-        f'"redthread", `--store {store_path}`), not local files.\n\n'
+        "This project's long-term memory is a Redthread store (MCP server "
+        f'"redthread", `--store {store_path}`) shared by every session, machine,\n'
+        "and agent working on this project. It is the only memory that counts here.\n\n"
         "- At session start, call `context_bootstrap` once — it returns this\n"
-        "  project's pipeline, recent runs, and the memory index in one call.\n"
-        "- Read what looks relevant with `memory_read` before making changes.\n"
+        "  project's pipeline, recent runs, and the memory index in one call — then\n"
+        "  `memory_read` what looks relevant before making changes.\n"
+        "- Never record durable knowledge anywhere else: not in the harness's own\n"
+        "  memory directory (e.g. `~/.claude/projects/**/memory/`), not in a scratch\n"
+        "  notes file. Those are invisible to other sessions, machines, and agents.\n"
         "- After completing a non-trivial task, write a dated summary with\n"
         "  `memory_write` (namespace `sessions`, key like `YYYY-MM-DD_short-slug`,\n"
         "  always with a one-line `description`): what changed, why, validation\n"
-        "  performed, follow-ups.\n"
+        "  performed, follow-ups. Write when the task finishes, not batched at the\n"
+        "  end of the session, and without being asked.\n"
         "- `memory_write` commits and pushes the store for you by default, so\n"
         "  memory reaches other machines without a second step. Check the `sync`\n"
         "  field it returns; if it says `failed`, say so and fix it rather than\n"
         "  leaving the entry stranded on this machine.\n"
         "- Store durable conventions and decisions under the `notes` namespace;\n"
-        "  never store secrets.\n"
+        "  check `memory_search` first and update the existing entry instead of\n"
+        "  adding a near-duplicate. Never store secrets.\n"
+        "- If the MCP server isn't connected, use the CLI on the same store rather\n"
+        f"  than skipping memory: `redthread bootstrap --store {store_path}`,\n"
+        f"  `redthread memory list|search|read|write ... --store {store_path}`.\n"
         "- Subagents do not inherit this file. When you delegate work that should\n"
         "  be remembered, tell the subagent to call `context_bootstrap` too.\n"
     )

@@ -86,7 +86,7 @@ claude mcp add redthread -- redthread mcp-serve --store ./my-store
 ```
 
 Verify with `/mcp` inside Claude Code — `redthread` should show as connected
-with 17 tools.
+with 18 tools.
 
 </details>
 

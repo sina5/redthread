@@ -211,6 +211,153 @@ def test_resolve_run_id_without_any_active_run_says_what_to_do(tmp_path):
         tools.resolve_run_id(store, None)
 
 
+# ---- memory_import -------------------------------------------------------
+
+
+def _source_tree(tmp_path):
+    source = tmp_path / "old-memory"
+    (source / "decisions").mkdir(parents=True)
+    (source / "sqlite.md").write_text("# Chose SQLite\n", encoding="utf-8")
+    (source / "decisions" / "db.md").write_text("nested note\n", encoding="utf-8")
+    (source / "logo.png").write_bytes(b"\x89PNG")
+    return source
+
+
+def test_memory_import_ports_a_directory_preserving_structure(tmp_path):
+    store = _store(tmp_path)
+    source = _source_tree(tmp_path)
+
+    report = tools.memory_import(store, source, namespace="ported", push=False)
+
+    assert report["imported"] == ["decisions/db", "sqlite"]
+    assert report["counts"] == {"imported": 2, "skipped": 0, "failed": 0}
+    assert store.memory_read("ported", "sqlite") == "# Chose SQLite\n"
+    assert store.memory_read("ported", "decisions/db") == "nested note\n"
+
+
+def test_memory_import_leaves_the_source_files_in_place(tmp_path):
+    store = _store(tmp_path)
+    source = _source_tree(tmp_path)
+
+    tools.memory_import(store, source, push=False)
+
+    assert (source / "sqlite.md").read_text(encoding="utf-8") == "# Chose SQLite\n"
+
+
+def test_memory_import_keeps_existing_frontmatter_and_indexes_it(tmp_path):
+    store = _store(tmp_path)
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "note.md").write_text(
+        "---\ndescription: Ported from Claude Code\ntags: [migration]\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+
+    tools.memory_import(store, source, namespace="ported", push=False)
+
+    entry = next(i for i in store.memory_index("ported") if i["key"] == "note")
+    assert entry["description"] == "Ported from Claude Code"
+    assert entry["tags"] == ["migration"]
+
+
+def test_memory_import_applies_tags_to_every_entry(tmp_path):
+    store = _store(tmp_path)
+    source = _source_tree(tmp_path)
+
+    tools.memory_import(store, source, namespace="ported", tags=["legacy"], push=False)
+
+    assert all(i["tags"] == ["legacy"] for i in store.memory_index("ported"))
+
+
+def test_memory_import_imports_a_single_file(tmp_path):
+    store = _store(tmp_path)
+    source = tmp_path / "one.md"
+    source.write_text("solo\n", encoding="utf-8")
+
+    report = tools.memory_import(store, source, namespace="ported", push=False)
+
+    assert report["imported"] == ["one"]
+
+
+def test_memory_import_skips_existing_keys_unless_overwritten(tmp_path):
+    store = _store(tmp_path)
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "note.md").write_text("new\n", encoding="utf-8")
+    store.memory_write("ported", "note", "old\n")
+
+    report = tools.memory_import(store, source, namespace="ported", push=False)
+    assert report["imported"] == []
+    assert report["skipped"] == [{"key": "note", "reason": "exists"}]
+    assert store.memory_read("ported", "note") == "old\n"
+
+    report = tools.memory_import(store, source, namespace="ported", overwrite=True, push=False)
+    assert report["imported"] == ["note"]
+    assert store.memory_read("ported", "note") == "new\n"
+
+
+def test_memory_import_reports_unchanged_entries_rather_than_rewriting_them(tmp_path):
+    store = _store(tmp_path)
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "note.md").write_text("same\n", encoding="utf-8")
+
+    tools.memory_import(store, source, namespace="ported", push=False)
+    report = tools.memory_import(store, source, namespace="ported", overwrite=True, push=False)
+
+    assert report["imported"] == []
+    assert report["skipped"] == [{"key": "note", "reason": "unchanged"}]
+    assert "already in this namespace" in report["_next"]
+
+
+def test_memory_import_reports_unreadable_files_without_failing_the_batch(tmp_path):
+    store = _store(tmp_path)
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "good.md").write_text("fine\n", encoding="utf-8")
+    (source / "bad.md").write_bytes(b"\xff\xfe not utf-8")
+
+    report = tools.memory_import(store, source, namespace="ported", push=False)
+
+    assert report["imported"] == ["good"]
+    assert [Path(f["path"]).name for f in report["failed"]] == ["bad.md"]
+
+
+def test_memory_import_raises_for_a_missing_source(tmp_path):
+    store = _store(tmp_path)
+    with pytest.raises(StoreError, match="does not exist"):
+        tools.memory_import(store, tmp_path / "nope", push=False)
+
+
+def test_memory_import_guides_the_caller_when_nothing_matched(tmp_path):
+    store = _store(tmp_path)
+    source = tmp_path / "empty"
+    source.mkdir()
+
+    report = tools.memory_import(store, source, push=False)
+
+    assert report["counts"]["imported"] == 0
+    assert "no text files found" in report["_next"]
+
+
+def test_memory_import_pushes_once_for_the_whole_batch(tmp_path):
+    store, _ = _remote_store(tmp_path)
+    source = _source_tree(tmp_path)
+
+    report = tools.memory_import(store, source, namespace="ported")
+
+    assert report["sync"]["status"] == "pushed"
+    assert "pushed" in report["_next"]
+    log = subprocess.run(
+        ["git", "log", "--oneline"],
+        cwd=store.layout.root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "import 2 entries into ported" in log
+
+
 # ---- agents_md_bootstrap -------------------------------------------------
 
 
