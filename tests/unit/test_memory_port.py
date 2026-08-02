@@ -83,7 +83,9 @@ def test_key_for_replaces_unsafe_characters(tmp_path):
 def test_key_for_cannot_escape_the_namespace(tmp_path):
     # A segment that slugs down to nothing is dropped, never emitted as a
     # traversal — the worst case is a lost segment, not a write outside.
-    path = _write(tmp_path / "..." / "real.md")
+    # Built as a path rather than written: `key_for` is pure path logic, and
+    # Windows can't create a directory named `...` in the first place.
+    path = tmp_path / "..." / "real.md"
     assert memory_port.key_for(path, tmp_path) == "real"
 
 
