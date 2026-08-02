@@ -232,6 +232,35 @@ def build_server(
         return tools.memory_search(_store(), query, namespace=namespace, limit=limit)
 
     @mcp.tool()
+    def memory_import(
+        source: str,
+        namespace: str = "imported",
+        recursive: bool = True,
+        overwrite: bool = False,
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Port memory that already exists as files at `source` into this
+        store — a harness's own memory directory (e.g.
+        ~/.claude/projects/<project>/memory/), a notes folder, another
+        store's memory/ tree. `source` may be a file or a directory; one
+        text file becomes one entry, keyed by its path under `source` with
+        the extension dropped, and any frontmatter it already had is kept.
+
+        Copies, never moves: the source files are left where they are.
+        Existing keys are skipped unless overwrite=True, and identical
+        content is skipped either way, so re-running is safe. Commits and
+        pushes once for the whole batch. Use this instead of re-typing
+        memory by hand when a project arrives with notes already written."""
+        return tools.memory_import(
+            _store(),
+            source,
+            namespace=namespace,
+            recursive=recursive,
+            overwrite=overwrite,
+            tags=tags,
+        )
+
+    @mcp.tool()
     def agents_md_bootstrap(project_dir: str | None = None) -> dict[str, Any]:
         """Add a short Redthread usage policy to this project's AGENTS.md
         (or CLAUDE.md, if that's the one that already exists) so agents use

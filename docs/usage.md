@@ -99,17 +99,17 @@ redthread project add-phase deploy --store ./my-store
 redthread mcp-serve [--store PATH] [--host-repo PATH] [--allow-clone]
 ```
 
-Runs an MCP server (stdio) exposing the store as 17 tools:
+Runs an MCP server (stdio) exposing the store as 18 tools:
 `context_bootstrap` (start here), `store_init`, `run_start`/`run_list`,
 `context_log`/`context_read`, `artifact_put`/`artifact_get`,
 `summary_update`/`summary_get`, `handoff_publish`/`handoff_get`,
-`memory_write`/`memory_read`/`memory_list`/`memory_search` for long-term
-memory not tied to any run, and `agents_md_bootstrap` (below). Point a
-coding agent's MCP config at this instead of its local `.claude`/`.agent`
-folder — the same memory becomes visible on every machine that clones the
-store.
+`memory_write`/`memory_read`/`memory_list`/`memory_search`/`memory_import`
+for long-term memory not tied to any run, and `agents_md_bootstrap`
+(below). Point a coding agent's MCP config at this instead of its local
+`.claude`/`.agent` folder — the same memory becomes visible on every
+machine that clones the store.
 
-Four conveniences worth knowing before you wire an agent up:
+Five conveniences worth knowing before you wire an agent up:
 
 - **`context_bootstrap` is the front door.** One call returns the phase
   pipeline, recent runs and their status, published handoffs, and the full
@@ -134,6 +134,12 @@ Four conveniences worth knowing before you wire an agent up:
   already safely on disk. Pass `push=False` to batch several writes and
   sync once at the end. Same for the CLI: `redthread memory write` pushes
   unless you pass `--no-push`.
+- **Memory you already have can be ported in.** `memory_import` (or
+  `redthread memory import <path>`) turns a file or a directory of notes
+  into memory entries — one text file per entry — so a project that arrives
+  with memory in a harness's own directory, a `docs/decisions/` folder, or
+  another store's `memory/` tree doesn't have to be re-typed. See
+  [Porting existing memory in](#porting-existing-memory-in).
 
 The same reads are also exposed as MCP **resources**, for clients that can
 attach context without spending a tool call: `redthread://project`,
@@ -183,7 +189,7 @@ Pick your client — each tab is ready to paste as-is.
     your team.
 
     Verify with `/mcp` inside Claude Code — `redthread` should show as
-    connected with 17 tools. A quick smoke test is asking the agent to call
+    connected with 18 tools. A quick smoke test is asking the agent to call
     `context_bootstrap`.
 
     To run from a source checkout instead, replace `uvx redthread` with
@@ -405,6 +411,7 @@ redthread memory write <namespace> <key> <file> [--description TEXT] [--tags a,b
 redthread memory read <namespace> <key>
 redthread memory list [namespace]              # key + description per entry
 redthread memory search <query> [--namespace NS] [--limit N]
+redthread memory import <path> [--namespace NS] [--overwrite] [--no-recursive] [--tags a,b]
 ```
 
 `--description` is stored as YAML frontmatter and is what `memory list`
@@ -422,6 +429,58 @@ redthread memory write notes toolchain.md ./note.md \
   --description "Why this project uses uv, not conda" --tags toolchain --store ./my-store
 redthread memory search uv --store ./my-store
 ```
+
+### Porting existing memory in
+
+Most projects meet Redthread with memory already written somewhere —
+usually a coding agent's own memory directory, which is exactly the memory
+that never leaves the machine it was written on. `memory import` moves it
+into the store in one command, so adopting Redthread doesn't start with an
+afternoon of copy-paste:
+
+```bash
+# a harness's local memory directory
+redthread memory import ~/.claude/projects/my-project/memory \
+  --namespace notes --store ./my-store
+
+# a folder of decision records, keeping their structure
+redthread memory import ./docs/decisions --namespace decisions --store ./my-store
+
+# a single file
+redthread memory import ./NOTES.md --namespace notes --store ./my-store
+```
+
+Agents can do the same through the `memory_import` MCP tool — worth asking
+for explicitly the first time you point one at a project that has notes
+lying around.
+
+How it behaves:
+
+- **One text file, one entry.** The key is the file's path under the source
+  with the extension dropped, so `decisions/db.md` becomes `decisions/db`
+  and whatever structure the notes had survives. Hidden files and
+  directories are skipped, as are non-text extensions.
+- **Content is copied verbatim.** Frontmatter the files already had keeps
+  working — a `description:` or `tags:` block is picked up by `memory list`
+  and `memory search` with no conversion step. Files without frontmatter
+  fall back to their first meaningful line, as usual.
+- **It's a copy, not a move.** Source files are left exactly where they
+  are, so a bad import costs you a namespace and nothing else.
+- **Re-running is safe.** Existing keys are skipped rather than
+  overwritten unless you pass `--overwrite`, and a key whose content
+  already matches is skipped either way. The command prints one line per
+  entry (`imported` / `skipped (exists)` / `skipped (unchanged)`) and a
+  tally.
+- **One commit for the batch.** The whole import is committed and pushed
+  once, not once per entry. `--no-push` opts out.
+- **A bad file doesn't sink the batch.** Anything unreadable or non-UTF-8
+  is reported on stderr and counted as `failed`; everything else still
+  lands.
+
+!!! tip "Check what you're importing"
+    An import is a bulk write to a git repo that's usually shared. Skim the
+    source directory first — old notes are exactly the kind of place a
+    stray API key ends up, and the store is not where you want it to land.
 
 ## Logging context
 

@@ -48,6 +48,41 @@ def test_memory_write_rejects_path_traversal(tmp_path):
     assert result.exit_code != 0
 
 
+def test_memory_import_reports_each_entry_and_a_tally(tmp_path):
+    store = str(tmp_path / "store")
+    runner.invoke(app, ["init", "demo", "--phases", "build", "--store", store])
+    source = tmp_path / "old-memory"
+    (source / "decisions").mkdir(parents=True)
+    (source / "sqlite.md").write_text("# Chose SQLite\n", encoding="utf-8")
+    (source / "decisions" / "db.md").write_text("nested\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["memory", "import", str(source), "--namespace", "ported", "--no-push", "--store", store],
+    )
+    assert result.exit_code == 0, result.output
+    assert "imported\tported/sqlite" in result.output
+    assert "imported\tported/decisions/db" in result.output
+    assert "2 imported, 0 skipped, 0 failed" in result.output
+
+    # Re-running is a no-op rather than a rewrite.
+    result = runner.invoke(
+        app,
+        ["memory", "import", str(source), "--namespace", "ported", "--no-push", "--store", store],
+    )
+    assert result.exit_code == 0, result.output
+    assert "0 imported, 2 skipped, 0 failed" in result.output
+
+
+def test_memory_import_missing_source_exits_nonzero(tmp_path):
+    store = str(tmp_path / "store")
+    runner.invoke(app, ["init", "demo", "--phases", "build", "--store", store])
+    result = runner.invoke(
+        app, ["memory", "import", str(tmp_path / "nope"), "--no-push", "--store", store]
+    )
+    assert result.exit_code != 0
+
+
 def test_memory_write_pushes_by_default_and_no_push_opts_out(tmp_path):
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)

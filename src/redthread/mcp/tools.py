@@ -11,6 +11,7 @@ which run it just wrote to.
 from pathlib import Path
 from typing import Any
 
+from redthread import memory_port
 from redthread.models import Handoff
 from redthread.store import LocalStore, StoreError, gitio
 
@@ -255,6 +256,105 @@ def memory_write(
     result: dict[str, Any] = {"namespace": namespace, "key": key, "description": description}
     if push:
         sync = gitio.sync_report(store.layout.root, f"redthread: memory {namespace}/{key}")
+    else:
+        sync = {"status": "skipped"}
+    result["sync"] = sync
+    next_text = _PUSH_NEXT[sync["status"]]
+    if sync.get("detail"):
+        next_text = f"{next_text} ({sync['detail']})"
+    result["_next"] = next_text
+    return result
+
+
+_IMPORT_NEXT_NO_FILES = (
+    "Nothing was imported — no text files found at that path. Check the path, "
+    "and pass recursive=True if the entries are in subdirectories."
+)
+_IMPORT_NEXT_ALL_SKIPPED = (
+    "Nothing was written — every file found is already in this namespace "
+    "(see `skipped`). Pass overwrite=True to replace entries that differ."
+)
+
+
+def memory_import(
+    store: LocalStore,
+    source: str | Path,
+    namespace: str = "imported",
+    recursive: bool = True,
+    overwrite: bool = False,
+    tags: list[str] | None = None,
+    push: bool = True,
+) -> dict[str, Any]:
+    """Copy existing memory files at `source` into `namespace`, one entry
+    per file, then commit+push once for the whole batch.
+
+    Entries are copied verbatim: whatever frontmatter the source already had
+    survives, and `memory_list` derives a description from it (or from the
+    first meaningful line) the same way it does for anything else. This is a
+    copy, never a move — the source files are left untouched, so a bad
+    import costs nothing but a namespace.
+
+    Existing keys are skipped rather than clobbered unless `overwrite`, and
+    a key whose content already matches is skipped either way, so re-running
+    an import is cheap and non-destructive.
+    """
+    source = Path(source).expanduser()
+    if not source.exists():
+        raise StoreError(f"nothing to import: {source} does not exist")
+
+    paths = memory_port.discover(source, recursive=recursive)
+    imported: list[str] = []
+    skipped: list[dict[str, str]] = []
+    failed: list[dict[str, str]] = []
+
+    for path in paths:
+        try:
+            key = memory_port.key_for(path, source)
+            content = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError, ValueError) as e:
+            failed.append({"path": str(path), "error": str(e)})
+            continue
+        try:
+            existing = store.memory_read(namespace, key)
+            if existing is not None:
+                # An unchanged re-import is a no-op even with overwrite on:
+                # rewriting identical bytes only makes noise in the history.
+                if existing == content:
+                    skipped.append({"key": key, "reason": "unchanged"})
+                    continue
+                if not overwrite:
+                    skipped.append({"key": key, "reason": "exists"})
+                    continue
+            store.memory_write(namespace, key, content, tags=tags)
+        except (StoreError, ValueError, OSError) as e:
+            failed.append({"path": str(path), "error": str(e)})
+            continue
+        imported.append(key)
+
+    result: dict[str, Any] = {
+        "source": str(source),
+        "namespace": namespace,
+        "imported": imported,
+        "skipped": skipped,
+        "failed": failed,
+        "counts": {
+            "imported": len(imported),
+            "skipped": len(skipped),
+            "failed": len(failed),
+        },
+    }
+
+    # Nothing written means nothing to publish — a sync here would report
+    # `no_changes` and read like the import half-worked.
+    if not imported:
+        result["sync"] = {"status": "skipped"}
+        result["_next"] = _IMPORT_NEXT_NO_FILES if not paths else _IMPORT_NEXT_ALL_SKIPPED
+        return result
+
+    if push:
+        sync = gitio.sync_report(
+            store.layout.root, f"redthread: import {len(imported)} entries into {namespace}"
+        )
     else:
         sync = {"status": "skipped"}
     result["sync"] = sync
