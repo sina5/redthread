@@ -5,7 +5,7 @@ Portable, git-backed memory for AI agents and multi-phase workflows.
 [![CI](https://github.com/sina5/redthread/actions/workflows/ci.yml/badge.svg)](https://github.com/sina5/redthread/actions/workflows/ci.yml)
 [![Docs](https://github.com/sina5/redthread/actions/workflows/docs.yml/badge.svg)](https://sina5.github.io/redthread/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.8-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.9-blue.svg)](CHANGELOG.md)
 
 ![Redthread — a red thread running through every phase of a pipeline](docs/assets/redthread.png)
 

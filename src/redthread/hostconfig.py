@@ -34,6 +34,75 @@ def marker_path(host_repo: Path) -> Path:
     return Path(host_repo) / MARKER_FILENAME
 
 
+def check_binding(host_repo: Path, store_path: Path) -> dict[str, object]:
+    """Does the store being served actually belong to the workspace being
+    edited? Returns a status plus both resolved paths.
+
+    An MCP server registered once, globally, in a client that reuses that
+    one registration for every workspace (Cursor, Windsurf, VS Code) serves
+    the SAME store no matter which project the agent has open. Nothing in
+    the store's own contents reveals that: the agent calls
+    ``context_bootstrap``, sees a real pipeline and a populated memory
+    index, and writes project B's session notes into project A's store.
+    Comparing the served store against the workspace is the only signal
+    that catches it, so it is computed here and surfaced by bootstrap.
+
+    - ``ok`` — the workspace's marker names this store, or the store lives
+      inside the workspace (worktree mode's normal shape).
+    - ``mismatch`` — the workspace's marker names a DIFFERENT store. The
+      server is pointed at the wrong project; writes here are misfiled.
+    - ``unverified`` — the workspace has no marker and the store is outside
+      it, so nothing connects the two. Legitimate for a deliberately shared
+      store, but indistinguishable from a stale global registration.
+    """
+    workspace = Path(host_repo).resolve()
+    store = Path(store_path).resolve()
+    config = read_host_config(workspace)
+
+    if config is not None:
+        expected = (workspace / config.store.path).resolve()
+        if expected == store:
+            return {
+                "status": "ok",
+                "workspace": str(workspace),
+                "store": str(store),
+                "expected_store": str(expected),
+                "detail": f"{MARKER_FILENAME} in {workspace} names this store.",
+            }
+        return {
+            "status": "mismatch",
+            "workspace": str(workspace),
+            "store": str(store),
+            "expected_store": str(expected),
+            "detail": (
+                f"{MARKER_FILENAME} in {workspace} names the store at {expected}, but this "
+                f"server is serving {store}. The MCP server is pointed at another project's "
+                f"store — most likely a single global registration reused across workspaces."
+            ),
+        }
+
+    if store == workspace or workspace in store.parents:
+        return {
+            "status": "ok",
+            "workspace": str(workspace),
+            "store": str(store),
+            "expected_store": None,
+            "detail": f"The store lives inside the workspace at {workspace}.",
+        }
+
+    return {
+        "status": "unverified",
+        "workspace": str(workspace),
+        "store": str(store),
+        "expected_store": None,
+        "detail": (
+            f"The workspace at {workspace} has no {MARKER_FILENAME} and the store at {store} "
+            f"is outside it, so nothing ties this store to this project. It may be a store "
+            f"shared on purpose, or a global MCP registration left pointing at another project."
+        ),
+    }
+
+
 def read_host_config(host_repo: Path) -> HostConfig | None:
     path = marker_path(host_repo)
     if not path.exists():

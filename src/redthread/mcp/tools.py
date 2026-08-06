@@ -11,7 +11,7 @@ which run it just wrote to.
 from pathlib import Path
 from typing import Any
 
-from redthread import memory_port
+from redthread import hostconfig, memory_port
 from redthread.models import Handoff
 from redthread.store import LocalStore, StoreError, gitio
 
@@ -30,7 +30,11 @@ def resolve_run_id(store: LocalStore, run_id: str | None) -> str:
 
 
 def context_bootstrap(
-    store: LocalStore, run_id: str | None = None, recent_runs: int = 5, memory_limit: int = 100
+    store: LocalStore,
+    run_id: str | None = None,
+    recent_runs: int = 5,
+    memory_limit: int = 100,
+    workspace: Path | None = None,
 ) -> dict[str, Any]:
     """Everything an agent needs to orient itself in this project, in one call.
 
@@ -38,6 +42,11 @@ def context_bootstrap(
     memory_list (per namespace it doesn't know about yet) -> handoff_get and
     usually giving up before it gets there. One front door is what makes
     memory actually get read.
+
+    Being the front door also makes this the one place a wrong-store
+    misconfiguration can be caught before anything is written: when
+    ``workspace`` is given, the served store is checked against it and a
+    mismatch leads the response instead of being buried in it.
     """
     manifest = store.manifest
     runs = store.list_runs()
@@ -72,11 +81,19 @@ def context_bootstrap(
                 summaries.append(phase)
 
     memory = store.memory_index()
-    return {
+    binding = (
+        hostconfig.check_binding(workspace, store.layout.root) if workspace is not None else None
+    )
+    payload: dict[str, Any] = {
         "project": {
             "project_id": manifest.project_id,
             "name": manifest.name,
             "phases": manifest.phases,
+        },
+        "store": {
+            "path": str(store.layout.root.resolve()),
+            "workspace": binding["workspace"] if binding else None,
+            "binding": binding["status"] if binding else "unchecked",
         },
         "current_run": resolved,
         "runs": {"total": len(runs), "recent": recent},
@@ -87,12 +104,54 @@ def context_bootstrap(
             "total": len(memory),
             "entries": memory[:memory_limit],
         },
-        "_next": _bootstrap_next(resolved, memory),
+        "_next": _bootstrap_next(resolved, memory, binding, manifest.project_id),
     }
+    if binding and binding["status"] != "ok":
+        payload["warning"] = _binding_warning(binding, manifest.project_id)
+    return payload
 
 
-def _bootstrap_next(run_id: str | None, memory: list[dict[str, Any]]) -> str:
+def _binding_warning(binding: dict[str, object], project_id: str) -> str:
+    """The wrong-store message, phrased so an agent stops rather than reads
+    past it. Names the project the store belongs to, because that is what
+    makes the mismatch legible to whoever has to fix the registration."""
+    lead = (
+        f"WRONG STORE: this store belongs to project {project_id!r}, which is not the "
+        f"project open in this workspace."
+        if binding["status"] == "mismatch"
+        else f"UNVERIFIED STORE: this store belongs to project {project_id!r}; nothing "
+        f"confirms it is this workspace's store."
+    )
+    return (
+        f"{lead} {binding['detail']} Do not write memory, entries, or handoffs here until "
+        f"this is resolved — anything written lands in the wrong project's history and is "
+        f"invisible to this one. Tell the user the redthread MCP server is pointed at the "
+        f"wrong store and needs a per-project `--store` (or a `.redthread.yaml` marker in "
+        f"this repo); `redthread init --worktree-repo .` creates this project its own store."
+    )
+
+
+def _bootstrap_next(
+    run_id: str | None,
+    memory: list[dict[str, Any]],
+    binding: dict[str, object] | None = None,
+    project_id: str | None = None,
+) -> str:
+    # A wrong-store warning has to displace the normal next steps, not sit
+    # beside them: "read memory, then write a session note" is precisely the
+    # sequence that misfiles work into another project.
+    if binding is not None and binding["status"] == "mismatch":
+        return (
+            "STOP — do not read this store's memory as if it were this project's, and do "
+            "not write anything here. Report the misconfiguration in `warning` to the user "
+            "and get the store path fixed first."
+        )
     steps = []
+    if binding is not None and binding["status"] == "unverified":
+        steps.append(
+            "first confirm with the user that this really is this project's store "
+            "(see `warning`) — if it isn't, stop and fix the MCP `--store` before writing"
+        )
     if memory:
         steps.append(
             "memory_read the entries above that look relevant before changing anything "
@@ -253,7 +312,15 @@ def memory_write(
     failed when it didn't.
     """
     store.memory_write(namespace, key, content, description=description, tags=tags)
-    result: dict[str, Any] = {"namespace": namespace, "key": key, "description": description}
+    # Naming the project written to costs nothing and is the last chance to
+    # notice a write that went to another project's store — a session that
+    # skipped context_bootstrap has had no other signal.
+    result: dict[str, Any] = {
+        "namespace": namespace,
+        "key": key,
+        "description": description,
+        "project_id": store.manifest.project_id,
+    }
     if push:
         sync = gitio.sync_report(store.layout.root, f"redthread: memory {namespace}/{key}")
     else:
@@ -382,7 +449,23 @@ def memory_search(
 _AGENTS_MD_MARKER = "<!-- redthread:agent-instructions -->"
 
 
-def _agents_md_section(store_path: Path) -> str:
+def _agents_md_section(store_path: Path, project_id: str | None = None) -> str:
+    # The expected project_id is pinned into the file on purpose: AGENTS.md
+    # travels with the repo, so it stays correct even when the MCP server is
+    # registered globally and points somewhere else entirely. That makes the
+    # check possible from the agent's side, with no cooperation from the
+    # client's configuration.
+    identity = (
+        f"- **Check you are in the right store before writing.** This project's store\n"
+        f"  is `{project_id}`. If `context_bootstrap` reports a different\n"
+        f"  `project.project_id`, or `store.binding` is not `ok`, STOP: the MCP server\n"
+        f"  is pointed at another project's store. Say so and do not write — memory\n"
+        f"  written there is filed under the wrong project and invisible to this one.\n"
+        if project_id
+        else "- **Check you are in the right store before writing.** If\n"
+        "  `context_bootstrap` reports `store.binding` other than `ok`, STOP: the MCP\n"
+        "  server is pointed at another project's store. Say so and do not write.\n"
+    )
     return (
         f"{_AGENTS_MD_MARKER}\n"
         "## Agent memory (Redthread)\n\n"
@@ -392,6 +475,7 @@ def _agents_md_section(store_path: Path) -> str:
         "- At session start, call `context_bootstrap` once — it returns this\n"
         "  project's pipeline, recent runs, and the memory index in one call — then\n"
         "  `memory_read` what looks relevant before making changes.\n"
+        f"{identity}"
         "- Never record durable knowledge anywhere else: not in the harness's own\n"
         "  memory directory (e.g. `~/.claude/projects/**/memory/`), not in a scratch\n"
         "  notes file. Those are invisible to other sessions, machines, and agents.\n"
@@ -415,10 +499,15 @@ def _agents_md_section(store_path: Path) -> str:
     )
 
 
-def agents_md_bootstrap(store_path: Path, project_dir: Path) -> dict[str, Any]:
+def agents_md_bootstrap(
+    store_path: Path, project_dir: Path, project_id: str | None = None
+) -> dict[str, Any]:
     """Ensure project_dir's AGENTS.md (or CLAUDE.md, if that's the one that
     already exists) tells agents to use this store as memory. Idempotent —
-    safe to call every session; a no-op once the instructions are present."""
+    safe to call every session; a no-op once the instructions are present.
+
+    `project_id` pins which project this repo's memory belongs to, so a
+    later session can catch an MCP server pointed at a different store."""
     project_dir = Path(project_dir)
     agents_md = project_dir / "AGENTS.md"
     claude_md = project_dir / "CLAUDE.md"
@@ -434,7 +523,7 @@ def agents_md_bootstrap(store_path: Path, project_dir: Path) -> dict[str, Any]:
     else:
         target = agents_md
 
-    section = _agents_md_section(store_path)
+    section = _agents_md_section(store_path, project_id)
     if target.exists():
         existing = target.read_text(encoding="utf-8-sig")
         new_text = existing.rstrip("\n") + "\n\n" + section

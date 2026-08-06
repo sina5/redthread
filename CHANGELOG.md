@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.9] - 2026-08-06
+
+### Added
+
+- **Wrong-store detection.** `context_bootstrap` now checks the store it is
+  serving against the workspace it was launched for and reports the result
+  as `store.binding`: `ok`, `unverified` (nothing ties the store to this
+  workspace), or `mismatch` (this repo's `.redthread.yaml` names a
+  different store). Anything but `ok` adds a `warning` field and replaces
+  `_next` with a stop instruction. MCP clients that register a server once
+  and reuse that registration for every workspace (Cursor, Windsurf, VS
+  Code) otherwise serve the same store to every project an agent opens —
+  and nothing in a store's contents reveals that it belongs to a different
+  project, so an agent reads a real pipeline and a populated memory index
+  and files this project's work into another project's history.
+  - `redthread.hostconfig.check_binding(host_repo, store_path)` exposes the
+    same check as a pure function.
+  - `memory_write` returns the `project_id` it actually wrote to, so a
+    session that skipped `context_bootstrap` still has a signal.
+  - The MCP server instructions and the `context_bootstrap`/`memory_write`
+    tool descriptions tell the agent to check `store.binding` before
+    writing anything.
+  - `agents_md_bootstrap` pins the expected `project_id` into the
+    `AGENTS.md`/`CLAUDE.md` policy it writes. That file travels with the
+    repo, so the check still works when the MCP server is registered
+    globally and points somewhere else entirely.
+- `redthread --version` (`-V`) prints the installed version.
+
 ## [0.8] - 2026-08-02
 
 ### Added

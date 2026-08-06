@@ -46,25 +46,31 @@ installed at all, run the one-time setup first, before other work.
 1. **Load memory before touching anything.** First action of the session:
    `context_bootstrap` (one call — pipeline, recent runs, and the memory
    index), then `memory_read` the entries that look relevant to the task.
-2. **Never record durable knowledge anywhere else.** Not in the harness's
+2. **Check you are in the right store before writing.** This project's store
+   is `<project_id>`. If `context_bootstrap` reports a different
+   `project.project_id`, or `store.binding` is anything other than `ok`,
+   STOP: the MCP server is pointed at another project's store. Tell the user
+   and write nothing — memory written there is filed under the wrong project
+   and invisible to this one.
+3. **Never record durable knowledge anywhere else.** Not in the harness's
    own memory directory (e.g. `~/.claude/projects/**/memory/`), not in a
    scratch `NOTES.md`, not in a comment. Those are invisible to other
    sessions, machines, and agents, and they defeat the point of the store.
    Anything worth remembering goes to `memory_write`.
-3. **Write after every non-trivial task** — anything that changed behavior,
+4. **Write after every non-trivial task** — anything that changed behavior,
    took more than a couple of steps, or that the next session would have to
    rediscover. Namespace `sessions`, key `YYYY-MM-DD_short-slug`, always
    with a one-line `description`; body covers what changed, why, how it was
    validated, and what's left. Do it when the task finishes, not batched at
    the end of the session, and without being asked.
-4. **Put durable conventions and decisions in the `notes` namespace.**
+5. **Put durable conventions and decisions in the `notes` namespace.**
    Update the existing entry rather than adding a near-duplicate — check
    `memory_search` first.
-5. **Never store secrets.** The store is a git repo with a shared remote.
-6. **`memory_write` commits and pushes for you.** Check the `sync` field it
+6. **Never store secrets.** The store is a git repo with a shared remote.
+7. **`memory_write` commits and pushes for you.** Check the `sync` field it
    returns; if it says `failed`, say so and fix it instead of leaving the
    entry stranded on this machine.
-7. **Subagents don't inherit this file.** When delegating work worth
+8. **Subagents don't inherit this file.** When delegating work worth
    remembering, tell the subagent to call `context_bootstrap` too, and to
    report back what belongs in memory.
 

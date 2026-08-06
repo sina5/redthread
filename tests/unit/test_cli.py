@@ -59,3 +59,12 @@ def test_cli_project_add_phase_rejects_duplicate(tmp_path):
 
     result = runner.invoke(app, ["project", "add-phase", "test", "--store", store])
     assert result.exit_code != 0
+
+
+def test_version_flag_prints_the_installed_version():
+    from redthread import __version__
+
+    for flag in ("--version", "-V"):
+        result = runner.invoke(app, [flag])
+        assert result.exit_code == 0
+        assert result.stdout.strip() == __version__

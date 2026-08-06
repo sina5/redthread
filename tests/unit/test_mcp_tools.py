@@ -468,3 +468,76 @@ def test_memory_write_without_a_remote_says_it_never_left_this_machine(tmp_path)
     assert written["sync"]["status"] == "committed"
     assert "remote" in written["sync"]["detail"]
     assert not gitio.is_dirty(store.layout.root)
+
+
+# ---- wrong-store detection ----------------------------------------------
+# The failure this guards: a globally-registered MCP server serves project
+# A's store while the agent edits project B. Bootstrap is the one call every
+# session makes, so it is where the mismatch has to surface.
+
+
+def test_bootstrap_reports_ok_binding_for_the_workspaces_own_store(tmp_path):
+    workspace = tmp_path / "proj"
+    workspace.mkdir()
+    store = LocalStore.init(workspace / "redthread-store", project_id="demo", phases=["build"])
+
+    payload = tools.context_bootstrap(store, workspace=workspace)
+    assert payload["store"]["binding"] == "ok"
+    assert "warning" not in payload
+
+
+def test_bootstrap_warns_and_halts_on_a_foreign_store(tmp_path):
+    workspace = tmp_path / "proj"
+    workspace.mkdir()
+    own = LocalStore.init(
+        workspace / "redthread-store",
+        project_id="mine",
+        phases=["build"],
+        host_repo=workspace,
+        publish_marker=False,
+    )
+    own.memory_write("notes", "conventions", "ours", description="ours")
+    foreign = LocalStore.init(tmp_path / "other", project_id="theirs", phases=["build"])
+    foreign.memory_write("notes", "conventions", "theirs", description="theirs")
+
+    payload = tools.context_bootstrap(foreign, workspace=workspace)
+
+    assert payload["store"]["binding"] == "mismatch"
+    assert "theirs" in payload["warning"]
+    # _next must not walk the agent into reading and then writing this store.
+    assert payload["_next"].startswith("STOP")
+    assert "memory_read" not in payload["_next"]
+
+
+def test_bootstrap_flags_an_unverified_store_without_halting(tmp_path):
+    workspace = tmp_path / "proj"
+    workspace.mkdir()
+    store = LocalStore.init(tmp_path / "elsewhere", project_id="other", phases=["build"])
+
+    payload = tools.context_bootstrap(store, workspace=workspace)
+    assert payload["store"]["binding"] == "unverified"
+    assert "warning" in payload
+    assert "confirm with the user" in payload["_next"]
+
+
+def test_bootstrap_without_a_workspace_leaves_binding_unchecked(tmp_path):
+    store = _store(tmp_path)
+    payload = tools.context_bootstrap(store)
+    assert payload["store"]["binding"] == "unchecked"
+    assert "warning" not in payload
+
+
+def test_memory_write_names_the_project_it_wrote_to(tmp_path):
+    store = _store(tmp_path)
+    result = tools.memory_write(store, "notes", "k", "body", description="d", push=False)
+    assert result["project_id"] == "demo"
+
+
+def test_agents_md_bootstrap_pins_the_expected_project_id(tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    tools.agents_md_bootstrap(tmp_path / "store", project_dir, "demo")
+
+    text = (project_dir / "AGENTS.md").read_text(encoding="utf-8")
+    assert "`demo`" in text
+    assert "STOP" in text
