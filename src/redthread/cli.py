@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 
-from redthread import hostconfig
+from redthread import __version__, hostconfig
 from redthread.adapters.present import run_present
 from redthread.mcp import tools as mcp_tools
 from redthread.mcp.server import main as run_mcp_server
@@ -28,6 +28,28 @@ for _stream in (sys.stdout, sys.stderr):
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
 StoreOpt = Annotated[Path, typer.Option("--store", help="Path to the Redthread store")]
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(__version__)
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            "-V",
+            help="Show the installed Redthread version and exit",
+            callback=_version_callback,
+            is_eager=True,
+        ),
+    ] = False,
+) -> None:
+    """Portable, git-backed memory for AI agents and multi-phase workflows."""
 
 
 def _open(store: Path) -> LocalStore:

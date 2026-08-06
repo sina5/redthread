@@ -27,7 +27,14 @@ def build_server(
             "Git-backed, portable working memory for this project. Call "
             "context_bootstrap first, every session, before any other tool "
             "here — it returns this project's pipeline, recent runs, and the "
-            "memory index in one call, and tells you what to do next. On a "
+            "memory index in one call, and tells you what to do next. "
+            "This server serves ONE store, and a client that registers it "
+            "globally reuses that registration for every workspace — so "
+            "before writing anything, check the `store.binding` field "
+            "context_bootstrap returns. If it is not `ok`, a `warning` field "
+            "explains why: stop, report it to the user, and do not write "
+            "memory, entries, or handoffs, because they would be filed under "
+            "another project and be invisible to this one. On a "
             "new project also call agents_md_bootstrap; it's idempotent, so "
             "calling it every session is fine, and it's what makes future "
             "sessions use this memory without being told. Run-scoped tools "
@@ -72,9 +79,21 @@ def build_server(
         at the start of every session — including inside a subagent, which
         does not inherit the main agent's instructions — before reading
         anything else or making changes. The `_next` field says what to do
-        with what it returns."""
+        with what it returns.
+
+        Also verifies that the store this server was pointed at is really
+        this workspace's store, and reports it as `store.binding`: `ok`,
+        `unverified` (nothing ties the store to this workspace), or
+        `mismatch` (this repo's .redthread.yaml names a different store).
+        Anything but `ok` comes with a `warning` field — read it and stop
+        before writing, rather than filing this project's work under
+        another project."""
         return tools.context_bootstrap(
-            _store(), run_id=run_id, recent_runs=recent_runs, memory_limit=memory_limit
+            _store(),
+            run_id=run_id,
+            recent_runs=recent_runs,
+            memory_limit=memory_limit,
+            workspace=host_repo,
         )
 
     @mcp.tool()
@@ -198,6 +217,12 @@ def build_server(
         (key `YYYY-MM-DD_short-slug`). Never write secrets: the store is a
         git repo, usually pushed to a shared remote.
 
+        Write only after context_bootstrap reported `store.binding: ok` —
+        this server serves one fixed store, so a global MCP registration
+        will happily accept this project's memory into another project's
+        history. The returned `project_id` names the project actually
+        written to; if it isn't this one, say so rather than continuing.
+
         The store is committed and pushed automatically; the returned `sync`
         field says what happened (`pushed`, `committed`, `no_changes`, or
         `failed` with a `detail`). A failed push never loses the entry — it
@@ -269,7 +294,11 @@ def build_server(
         other tool, on every session; it's a no-op once already present.
         project_dir defaults to the server's working directory."""
         target_dir = Path(project_dir) if project_dir else Path.cwd()
-        return tools.agents_md_bootstrap(store_path, target_dir)
+        try:
+            project_id = _store().manifest.project_id
+        except StoreError:
+            project_id = None  # store not created yet; the policy still applies
+        return tools.agents_md_bootstrap(store_path, target_dir, project_id)
 
     # ---- resources -------------------------------------------------------
     # The same reads as the tools above, exposed as resources so clients that

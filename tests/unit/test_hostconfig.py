@@ -254,3 +254,48 @@ def test_ensure_repo_leaves_an_existing_repo_and_its_subdirs_alone(tmp_path):
     # second, nested repo would be worse than doing nothing.
     assert gitio.ensure_repo(nested) is False
     assert not (nested / ".git").exists()
+
+
+# ---- check_binding -------------------------------------------------------
+# An MCP server registered once and reused across workspaces serves the same
+# store to every project. These pin the signal that catches it.
+
+
+def test_check_binding_ok_when_marker_names_this_store(tmp_path):
+    host = _host_repo(tmp_path / "host")
+    store = tmp_path / "store-wt"
+    LocalStore.init_worktree(host, store, "redthread-store", project_id="demo", phases=["build"])
+
+    result = hostconfig.check_binding(host, store)
+    assert result["status"] == "ok"
+
+
+def test_check_binding_mismatch_when_marker_names_another_store(tmp_path):
+    host = _host_repo(tmp_path / "host")
+    own = tmp_path / "store-wt"
+    LocalStore.init_worktree(host, own, "redthread-store", project_id="mine", phases=["build"])
+    other = LocalStore.init(tmp_path / "other-store", project_id="theirs", phases=["build"])
+
+    result = hostconfig.check_binding(host, other.layout.root)
+    assert result["status"] == "mismatch"
+    assert result["expected_store"] == str(own.resolve())
+    assert result["store"] == str(other.layout.root.resolve())
+
+
+def test_check_binding_ok_when_store_lives_inside_workspace(tmp_path):
+    workspace = tmp_path / "proj"
+    workspace.mkdir()
+    store = workspace / "redthread-store"
+    LocalStore.init(store, project_id="demo", phases=["build"])
+
+    assert hostconfig.check_binding(workspace, store)["status"] == "ok"
+
+
+def test_check_binding_unverified_when_nothing_ties_store_to_workspace(tmp_path):
+    workspace = tmp_path / "proj"
+    workspace.mkdir()
+    store = LocalStore.init(tmp_path / "elsewhere", project_id="other", phases=["build"])
+
+    result = hostconfig.check_binding(workspace, store.layout.root)
+    assert result["status"] == "unverified"
+    assert result["expected_store"] is None
