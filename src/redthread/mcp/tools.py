@@ -11,7 +11,7 @@ which run it just wrote to.
 from pathlib import Path
 from typing import Any
 
-from redthread import hostconfig, memory_port
+from redthread import __version__, constants, hostconfig, memory_port, update_check
 from redthread.models import Handoff
 from redthread.store import LocalStore, StoreError, gitio
 
@@ -108,6 +108,12 @@ def context_bootstrap(
     }
     if binding and binding["status"] != "ok":
         payload["warning"] = _binding_warning(binding, manifest.project_id)
+    # Surfaced through the agent, which is the only party here with a way to
+    # reach the human. Throttled and failure-silent, so it costs nothing on
+    # the sessions where there is nothing to say.
+    upgrade = update_check.update_message(__version__)
+    if upgrade:
+        payload["update_available"] = upgrade
     return payload
 
 
@@ -446,7 +452,7 @@ def memory_search(
     return store.memory_search(query, namespace=namespace, limit=limit)
 
 
-_AGENTS_MD_MARKER = "<!-- redthread:agent-instructions -->"
+_AGENTS_MD_MARKER = constants.AGENTS_MD_MARKER
 
 
 def _agents_md_section(store_path: Path, project_id: str | None = None) -> str:

@@ -16,6 +16,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
+from redthread import constants
 from redthread.blobs.base import BlobBackend
 from redthread.models import Artifact, ContextEntry, Handoff
 from redthread.store import LocalStore, StoreError
@@ -42,8 +43,8 @@ class PhaseAdapter:
         phase: str,
         code_dir: Path | None = None,
         agent: str | None = None,
-        metric_batch_size: int = 50,
-        metric_batch_interval: float = 60.0,
+        metric_batch_size: int = constants.METRIC_BATCH_SIZE,
+        metric_batch_interval: float = constants.METRIC_BATCH_INTERVAL_SECONDS,
     ):
         self.store = store
         self.run_id = run_id

@@ -11,7 +11,9 @@ from typing import Any
 
 import yaml
 
-_FENCE = "---"
+from redthread import constants
+
+_FENCE = constants.MEMORY_DOC_FENCE
 
 
 def split(text: str) -> tuple[dict[str, Any], str]:

@@ -9,10 +9,11 @@ mounted locally. The map itself is per-machine config, never committed.
 import json
 from pathlib import Path
 
+from redthread import constants
 from redthread.blobs.rsync import RsyncBackend
 from redthread.config_dir import default_config_dir
 
-_MAP_FILE = "paths.json"
+_MAP_FILE = constants.PATHS_MAP_FILE
 
 
 class PathsMap:

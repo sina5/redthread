@@ -10,12 +10,13 @@ without changing this function's contract.
 import time
 from pathlib import Path
 
+from redthread import constants
 from redthread.store import gitio
 
 
 def run_daemon(
     store_root: Path,
-    interval: float = 10.0,
+    interval: float = constants.SYNC_DAEMON_INTERVAL_SECONDS,
     message: str = "redthread auto-commit",
     max_iterations: int | None = None,
 ) -> None:

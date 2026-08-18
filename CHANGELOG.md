@@ -2,6 +2,96 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.10] - 2026-08-17
+
+### Fixed
+
+- **Git operations can no longer hang waiting for a human.** Every git
+  invocation in the package funnels through `store.gitio._run`, which ran
+  `subprocess.run` with no timeout, with stdout and stderr on pipes, and
+  with the parent's stdin inherited. When git decided to ask for
+  credentials it blocked forever on a prompt nobody could see — a single
+  `memory_write` blocked a session for ~30 minutes with no output and no
+  error, even though the commit had already been made and pushed. `_run`
+  now:
+  - redirects stdin to `DEVNULL`;
+  - sets `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never` over a copy of
+    the environment, so a GUI credential helper cannot open a dialog that
+    sits unnoticed behind another window;
+  - carries a `GIT_TIMEOUT_SECONDS = 60` budget (`clone` is the documented
+    exception, below);
+  - converts `subprocess.TimeoutExpired` into `GitError` *regardless of the
+    `check` argument*, since `push` and `pull_rebase` pass `check=False`
+    and would otherwise swallow the stall silently.
+
+  This is what makes `sync_report`'s existing design hold: a stalled push is
+  now reported as `{"status": "failed"}` with the entry safely committed on
+  disk, instead of never returning. It also stops `sync`'s 5-attempt retry
+  loop from multiplying one stall across ten blocking network calls.
+
+  Trade-off: first-time authentication no longer prompts. A machine with no
+  stored credentials must run `git push` once by hand to establish them —
+  the right trade for a tool that runs headless inside an MCP server.
+
+- **A timed-out git call now kills its transport helper too.** Terminating
+  the `git` process alone left `git-remote-https` — a child, not the process
+  we hold a handle to — running with the connection and its file handles
+  into the repo still open. `_run` tears down the whole process tree
+  (`taskkill /T` on Windows, `killpg` on POSIX, where git is now started in
+  its own process group).
+
+- **`clone` no longer has a wall-clock timeout, and reports progress
+  instead.** A 600s cap punished the honest case — a large store is
+  legitimately slow to clone — while silence made a slow clone
+  indistinguishable from a hang. Clone now runs unbounded in elapsed time
+  and reports every `CLONE_PROGRESS_INTERVAL_SECONDS` (5s), passing either
+  git's own newest progress line or a bare "still running" plus elapsed
+  time. What bounds it instead is git's own throughput floor: the clone runs
+  under `http.lowSpeedLimit`/`http.lowSpeedTime`, so a transfer that has
+  effectively stopped still aborts rather than hanging forever. `clone`,
+  `resume`, and `hostconfig.attach` take an `on_progress` callback; the CLI
+  prints it to stderr, keeping machine-readable stdout clean.
+
+- **A failed clone cleans up after itself and says what to do next.** Git
+  creates the destination and starts filling it immediately, so a clone that
+  died partway left a directory that was neither absent nor usable: the
+  obvious retry hit "destination path already exists and is not an empty
+  directory", and `hostconfig.attach` — which probes for the path — mistook
+  the wreckage for a real store. The partial directory is now removed (never
+  a directory that already existed), and the `GitError` names the manual
+  `git clone` command, since the usual cause is a credential prompt this
+  module deliberately refuses to show.
+
+### Added
+
+- **`redthread mcp` checks PyPI for a newer release.** The MCP server is
+  long-lived and launched by an agent client, so its user never sees a
+  release note — which is how a machine ends up two versions behind without
+  anyone noticing. When a newer version is published, the notice arrives
+  both on the server's stderr at startup and as an `update_available` field
+  on `context_bootstrap`, the latter being what actually reaches the user
+  via the agent. It names the upgrade command
+  (`uv pip install --upgrade redthread`, `pip install --upgrade redthread`,
+  or `uv tool install --reinstall redthread`).
+
+  Best-effort by construction: a 3s timeout, throttled to once a day, and
+  every failure path — no network, PyPI down, malformed response, corrupt
+  cache, unparseable version — resolves to no message rather than an error.
+  Versions compare numerically, so `0.9.0` correctly reads as older than
+  `0.10.0`. Set `REDTHREAD_NO_UPDATE_CHECK=1` to disable it entirely; the
+  test suite does, so no test reaches the network.
+
+### Changed
+
+- **Every tunable default now lives in `redthread.constants`.** Timeouts,
+  retry budgets, poll intervals, batch sizes, well-known filenames, and the
+  domain vocabularies (`RUN_STATUSES`, `ENTRY_TYPES`, `ARTIFACT_BACKENDS`,
+  `TEXT_SUFFIXES`) were literals scattered across a dozen modules, so
+  changing one meant knowing which file it happened to live in. Modules now
+  import from `constants`; a few re-export under their existing names, so
+  `gitio.DEFAULT_TIMEOUT_SECONDS` and `hostconfig.MARKER_FILENAME` keep
+  working.
+
 ## [0.9] - 2026-08-06
 
 ### Added

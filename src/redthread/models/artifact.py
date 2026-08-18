@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-BACKENDS = frozenset({"s3", "minio", "rsync", "gitlfs", "inline"})
+from redthread import constants
+
+BACKENDS = constants.ARTIFACT_BACKENDS
 
 
 class Artifact(BaseModel):

@@ -4,8 +4,10 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
-RUN_STATUSES = frozenset({"created", "active", "done", "failed"})
-PHASE_STATUSES = frozenset({"pending", "active", "done", "failed"})
+from redthread import constants
+
+RUN_STATUSES = constants.RUN_STATUSES
+PHASE_STATUSES = constants.PHASE_STATUSES
 
 
 class NodeStint(BaseModel):

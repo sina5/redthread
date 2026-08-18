@@ -10,9 +10,10 @@ from pathlib import Path
 
 from ulid import ULID
 
+from redthread import constants
 from redthread.config_dir import default_config_dir
 
-_NODE_ID_FILE = "node_id"
+_NODE_ID_FILE = constants.NODE_ID_FILE
 
 
 def new_ulid() -> str:

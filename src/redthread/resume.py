@@ -9,6 +9,7 @@ out of the domain-neutral core.
 """
 
 import socket
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,13 +19,17 @@ from redthread.store import LocalStore, StoreError, gitio
 
 
 def resume(
-    store_root: Path, run_id: str, remote: str | None = None, host: str | None = None
+    store_root: Path,
+    run_id: str,
+    remote: str | None = None,
+    host: str | None = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> RunRecord:
     store_root = Path(store_root)
     if not (store_root / "project.yaml").exists():
         if not remote:
             raise StoreError(f"no store at {store_root} and no --remote given to clone from")
-        gitio.clone(remote, store_root)
+        gitio.clone(remote, store_root, on_progress=on_progress)
     else:
         if remote and not gitio.has_remote(store_root):
             gitio.set_remote(store_root, remote)

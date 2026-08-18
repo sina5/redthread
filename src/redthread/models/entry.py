@@ -5,11 +5,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-# Domain-neutral event vocabulary. "metric" means any measured result:
-# val_acc for an ML run, coverage or bundle size for an app build.
-ENTRY_TYPES = frozenset(
-    {"metric", "decision", "code_change", "artifact_ref", "error", "milestone", "note"}
-)
+from redthread import constants
+
+ENTRY_TYPES = constants.ENTRY_TYPES
 
 
 class Provenance(BaseModel):
