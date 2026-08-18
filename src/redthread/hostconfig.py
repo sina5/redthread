@@ -6,16 +6,18 @@ flags. Written automatically by `LocalStore.init`/`init_worktree` when a
 `host_repo` is given; nothing reads or writes it otherwise.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
 import yaml
 from pydantic import BaseModel
 
+from redthread import constants
 from redthread.store import gitio
 from redthread.store.errors import StoreError
 
-MARKER_FILENAME = ".redthread.yaml"
+MARKER_FILENAME = constants.MARKER_FILENAME
 
 
 class StoreRef(BaseModel):
@@ -162,7 +164,13 @@ def publish_marker(host_repo: Path, store_path: Path) -> dict[str, object]:
     return {"ignored": ignored, "committed": committed, "detail": None}
 
 
-def attach(host_repo: Path, store_path: Path, *, allow_clone: bool = False) -> HostConfig:
+def attach(
+    host_repo: Path,
+    store_path: Path,
+    *,
+    allow_clone: bool = False,
+    on_progress: Callable[[str], None] | None = None,
+) -> HostConfig:
     """Make `store_path` exist, per the marker in `host_repo`. Worktree mode
     always attaches freely (it's just the repo you already cloned). Repo
     mode requires `allow_clone=True` to clone a missing store, since that
@@ -200,7 +208,7 @@ def attach(host_repo: Path, store_path: Path, *, allow_clone: bool = False) -> H
                 f"cloned locally yet; pass --allow-clone to clone it automatically, "
                 f"or clone it yourself first: git clone {ref.url} {store_path}"
             )
-        gitio.clone(ref.url, store_path)
+        gitio.clone(ref.url, store_path, on_progress=on_progress)
         return config
 
     current_url = gitio.get_remote_url(store_path) if gitio.has_remote(store_path) else None

@@ -52,6 +52,16 @@ def _main(
     """Portable, git-backed memory for AI agents and multi-phase workflows."""
 
 
+def _progress(message: str) -> None:
+    """Print a long-running operation's heartbeat to stderr.
+
+    stderr, not stdout: several commands have machine-readable stdout (an id,
+    a JSON document) that a caller may be piping, and progress chatter has no
+    business in it.
+    """
+    typer.secho(message, fg=typer.colors.BRIGHT_BLACK, err=True)
+
+
 def _open(store: Path) -> LocalStore:
     try:
         return LocalStore(store)
@@ -541,7 +551,7 @@ def resume(
         if worktree_repo:
             record = resume_worktree_run(worktree_repo, store, branch, run_id)
         else:
-            record = resume_run(store, run_id, remote=remote)
+            record = resume_run(store, run_id, remote=remote, on_progress=_progress)
     except StoreError as e:
         _fail(e)
     typer.echo(f"resumed {record.run_id} on this node ({len(record.nodes)} node stints total)")
@@ -562,7 +572,7 @@ def attach(
     attaching a worktree branch, cloning a store repo (with --allow-clone),
     or syncing the marker's url once a repo-mode store has a remote."""
     try:
-        config = hostconfig.attach(host_repo, store, allow_clone=allow_clone)
+        config = hostconfig.attach(host_repo, store, allow_clone=allow_clone, on_progress=_progress)
     except StoreError as e:
         _fail(e)
     typer.echo(f"attached {store} ({config.store.mode} mode)")

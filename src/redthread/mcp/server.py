@@ -6,12 +6,13 @@ visible on every machine that clones it.
 """
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from redthread import hostconfig
+from redthread import __version__, hostconfig, update_check
 from redthread.mcp import tools
 from redthread.store import LocalStore, StoreError
 
@@ -373,4 +374,18 @@ def build_server(
 
 
 def main(store_path: Path, host_repo: Path | None = None, allow_clone: bool = False) -> None:
+    _announce_update()
     build_server(store_path, host_repo=host_repo, allow_clone=allow_clone).run(transport="stdio")
+
+
+def _announce_update() -> None:
+    """Note a newer release on stderr as the server comes up.
+
+    stderr specifically: stdout is the MCP transport, and one stray line on it
+    corrupts the session. `context_bootstrap` carries the same notice to the
+    agent, which is what actually reaches the user — this copy is for whoever
+    reads the server log.
+    """
+    message = update_check.update_message(__version__)
+    if message:
+        print(message, file=sys.stderr)

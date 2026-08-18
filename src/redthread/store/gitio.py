@@ -7,10 +7,19 @@ onto whatever the remote has, and pushes, retrying the rebase+push if
 another node pushed in the meantime.
 """
 
+import contextlib
+import os
+import queue
+import shutil
+import signal
 import subprocess
+import sys
+import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
+from redthread import constants
 from redthread.store.errors import StoreError
 
 
@@ -18,10 +27,92 @@ class GitError(StoreError):
     pass
 
 
-def _run(args: list[str], cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
-    result = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8"
+# Re-exported so call sites read naturally; defined in `constants`.
+DEFAULT_TIMEOUT_SECONDS = constants.GIT_TIMEOUT_SECONDS
+CLONE_PROGRESS_INTERVAL_SECONDS = constants.CLONE_PROGRESS_INTERVAL_SECONDS
+CLONE_STALL_LIMIT_BYTES_PER_SECOND = constants.CLONE_STALL_LIMIT_BYTES_PER_SECOND
+CLONE_STALL_LIMIT_SECONDS = constants.CLONE_STALL_LIMIT_SECONDS
+
+
+def _noninteractive_env() -> dict[str, str]:
+    """Environment that makes git fail rather than wait for a human.
+
+    Every call here captures stdout and stderr, and usually runs inside an MCP
+    server with no terminal attached. A credential prompt in that setting is
+    not a question anyone can answer — it is an invisible, unbounded hang, and
+    with a GUI credential helper it may not even appear on screen. These
+    variables turn that case into an ordinary non-zero exit, which
+    `sync_report` can report as a failed push while the commit stays safely on
+    disk.
+
+    The trade-off is that first-time authentication no longer prompts: a
+    machine with no stored credentials has to `git push` once by hand to
+    establish them.
+    """
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"  # don't prompt on the terminal
+    env["GCM_INTERACTIVE"] = "never"  # don't let Git Credential Manager open a dialog
+    return env
+
+
+# On POSIX, put git in its own process group so the whole group can be
+# signalled at once. Windows has no equivalent knob here; `_terminate_tree`
+# uses taskkill's /T instead.
+_OWN_PROCESS_GROUP: dict[str, bool] = {} if sys.platform == "win32" else {"start_new_session": True}
+
+
+def _terminate_tree(proc: "subprocess.Popen") -> None:
+    """Kill git *and* whatever transport helper it spawned.
+
+    Killing the `git` process alone is not enough: a network operation runs
+    through a helper (`git-remote-https`, and under a credential manager
+    possibly a GUI process too), and those are children, not the process we
+    hold a handle to. Left alive, a helper keeps the connection — and any
+    file handles into the repo — open after we have already given up on it,
+    which on Windows is enough to make a subsequent cleanup of the directory
+    fail. Best-effort throughout: a process that already exited is the
+    outcome we wanted anyway.
+    """
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+            capture_output=True,
+            check=False,
+        )
+    else:
+        with contextlib.suppress(OSError):
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    with contextlib.suppress(OSError):
+        proc.kill()
+
+
+def _run(
+    args: list[str],
+    cwd: Path,
+    check: bool = True,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> subprocess.CompletedProcess:
+    proc = subprocess.Popen(
+        ["git", *args],
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        env=_noninteractive_env(),
+        **_OWN_PROCESS_GROUP,
     )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        _terminate_tree(proc)
+        with contextlib.suppress(subprocess.TimeoutExpired, OSError):
+            proc.communicate(timeout=constants.GIT_REAP_TIMEOUT_SECONDS)
+        # Raised whatever `check` says: a timeout leaves no return code to
+        # inspect, and no caller wants it silently treated as a plain failure.
+        raise GitError(f"git {' '.join(args)} timed out after {timeout}s in {cwd}") from exc
+    result = subprocess.CompletedProcess(args, proc.returncode, stdout=stdout, stderr=stderr)
     if check and result.returncode != 0:
         raise GitError(f"git {' '.join(args)} failed in {cwd}:\n{result.stderr.strip()}")
     return result
@@ -79,13 +170,154 @@ def commit_paths(repo: Path, message: str, paths: list[str]) -> bool:
     return True
 
 
-def clone(remote: str, dest: Path, branch: str | None = None) -> None:
+def _stream_progress(
+    args: list[str],
+    cwd: Path,
+    on_progress: Callable[[str], None] | None,
+    interval: float = CLONE_PROGRESS_INTERVAL_SECONDS,
+) -> subprocess.CompletedProcess:
+    """Run git with no wall-clock cap, reporting that it is still alive.
+
+    Used only by `clone`. Everything else in this module is bounded by
+    `DEFAULT_TIMEOUT_SECONDS`, but a clone can be legitimately long, and
+    killing an honest transfer at an arbitrary deadline is worse than waiting.
+    The cost of dropping the deadline is that silence becomes ambiguous — so
+    this reports at a fixed interval instead, either the newest line of git's
+    own progress or a bare "still running" if git has gone quiet.
+
+    Git writes progress to stderr as carriage-return-terminated chunks.
+    Reading the pipe in text mode translates those to newlines
+    (universal newlines), so iterating
+    it yields one progress update at a time rather than blocking to end of
+    stream. That read happens on a thread so a silent git cannot stop the
+    interval from firing.
+    """
+    proc = subprocess.Popen(
+        ["git", *args],
+        cwd=cwd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=_noninteractive_env(),
+        **_OWN_PROCESS_GROUP,
+    )
+
+    lines: queue.Queue[str | None] = queue.Queue()
+
+    def pump() -> None:
+        try:
+            for line in proc.stderr:  # type: ignore[union-attr]
+                lines.put(line)
+        finally:
+            lines.put(None)  # EOF
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+
+    started = time.monotonic()
+    latest = ""
+    tail: list[str] = []
+    next_report = started + interval
+    while True:
+        try:
+            line = lines.get(timeout=0.2)
+        except queue.Empty:
+            line = ""
+        if line is None:
+            break
+        if line.strip():
+            latest = line.strip()
+            tail.append(latest)
+            del tail[:-20]  # only the end of it is useful in an error
+        now = time.monotonic()
+        if on_progress and now >= next_report:
+            elapsed = int(now - started)
+            on_progress(f"{latest or 'still running'} ({elapsed}s elapsed)")
+            next_report = now + interval
+
+    returncode = proc.wait()
+    if returncode != 0:
+        # git itself is gone, but a transport helper can outlive it and keep
+        # writing into the destination we are about to delete.
+        _terminate_tree(proc)
+    reader.join(timeout=constants.GIT_REAP_TIMEOUT_SECONDS)
+    stdout = proc.stdout.read() if proc.stdout else ""
+    return subprocess.CompletedProcess(args, returncode, stdout=stdout, stderr="\n".join(tail))
+
+
+def clone(
+    remote: str,
+    dest: Path,
+    branch: str | None = None,
+    on_progress: Callable[[str], None] | None = None,
+) -> None:
+    """Clone `remote` into `dest`, reporting progress while it runs.
+
+    Deliberately has no timeout: see `_stream_progress` and
+    `CLONE_STALL_LIMIT_SECONDS` for what bounds it instead.
+    """
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    args = ["clone", "-q", str(remote), str(dest)]
+    preexisting = dest.exists()
+    args = [
+        # Git aborts itself if the transfer flatlines, which is what makes
+        # dropping the wall-clock timeout safe.
+        "-c",
+        f"http.lowSpeedLimit={CLONE_STALL_LIMIT_BYTES_PER_SECOND}",
+        "-c",
+        f"http.lowSpeedTime={CLONE_STALL_LIMIT_SECONDS}",
+        "clone",
+        "--progress",
+    ]
     if branch:
-        args = ["clone", "-q", "-b", branch, str(remote), str(dest)]
-    _run(args, cwd=dest.parent)
+        args += ["-b", branch]
+    args += [str(remote), str(dest)]
+
+    try:
+        result = _stream_progress(args, cwd=dest.parent, on_progress=on_progress)
+    except OSError as exc:
+        _discard_partial_clone(dest, preexisting)
+        raise GitError(_clone_failure_message(remote, dest, str(exc))) from exc
+    if result.returncode != 0:
+        _discard_partial_clone(dest, preexisting)
+        raise GitError(_clone_failure_message(remote, dest, result.stderr.strip()))
+
+
+def _discard_partial_clone(dest: Path, preexisting: bool) -> None:
+    """Remove the half-written directory a failed clone leaves behind.
+
+    Git creates the destination and starts filling it immediately, so a clone
+    that dies partway leaves a directory that is neither absent nor usable.
+    That is worse than either: a retry hits "destination path already exists
+    and is not an empty directory", and callers that probe for the path (as
+    `hostconfig` does) mistake the wreckage for a real store. Only clean up
+    what this call created — never a directory that was already there.
+    """
+    if preexisting or not dest.exists():
+        return
+    shutil.rmtree(dest, ignore_errors=True)
+
+
+def _clone_failure_message(remote: str, dest: Path, detail: str) -> str:
+    """Say what broke *and* what to do about it.
+
+    A failed clone is one of the few errors here with an obvious manual
+    recovery, and it is usually a credential problem — which this module
+    deliberately refuses to prompt for. Naming the command is the whole
+    remedy, so it belongs in the message rather than in documentation the
+    reader is not currently looking at.
+    """
+    lines = [f"could not clone {remote} into {dest}"]
+    if detail:
+        lines.append(detail)
+    lines.append(
+        f"clone it yourself to sort out credentials or a slow network, "
+        f"then re-run this command: git clone {remote} {dest}"
+    )
+    return "\n".join(lines)
 
 
 def branch_exists(repo: Path, branch: str) -> bool:
@@ -214,7 +446,12 @@ def sync_report(repo: Path, message: str, remote: str = "origin") -> dict[str, s
     return {"status": "pushed" if changed else "no_changes"}
 
 
-def sync(repo: Path, message: str, remote: str = "origin", max_retries: int = 5) -> bool:
+def sync(
+    repo: Path,
+    message: str,
+    remote: str = "origin",
+    max_retries: int = constants.SYNC_MAX_RETRIES,
+) -> bool:
     """Commit local changes if any, then rebase onto and push to `remote`,
     retrying if another node pushed first. Returns True if anything was
     committed or pushed."""
@@ -231,6 +468,11 @@ def sync(repo: Path, message: str, remote: str = "origin", max_retries: int = 5)
         stderr = result.stderr.lower()
         if "rejected" not in stderr and "fetch first" not in stderr:
             raise GitError(f"git push failed in {repo}:\n{result.stderr.strip()}")
-        time.sleep(min(0.5 * (2**attempt), 5))
+        time.sleep(
+            min(
+                constants.SYNC_RETRY_BACKOFF_SECONDS * (2**attempt),
+                constants.SYNC_RETRY_BACKOFF_CAP_SECONDS,
+            )
+        )
 
     raise GitError(f"git push kept getting rejected after {max_retries} retries in {repo}")

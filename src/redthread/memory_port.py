@@ -13,10 +13,12 @@ derivation only, which is the part worth testing on its own.
 import re
 from pathlib import Path
 
+from redthread import constants
+
 #: Extensions worth importing. Memory entries are text; anything else in a
 #: notes folder (images, `.DS_Store`, a stray `.zip`) is noise, and silently
 #: importing binary as UTF-8 would fail late and confusingly.
-TEXT_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".mdx", ""})
+TEXT_SUFFIXES = constants.TEXT_SUFFIXES
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 

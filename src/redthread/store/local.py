@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-from redthread import memory_doc
+from redthread import constants, memory_doc
 from redthread.blobs.base import BlobBackend
 from redthread.hashing import sha256_file
 from redthread.ids import get_node_id, new_ulid
@@ -33,7 +33,7 @@ from redthread.store import gitio
 from redthread.store.errors import StoreError
 from redthread.store.layout import StoreLayout
 
-_GITATTRIBUTES = "* text=auto eol=lf\n*.ndjson merge=union\n"
+_GITATTRIBUTES = constants.GITATTRIBUTES
 
 
 def _write_text(path: Path, text: str) -> None:
