@@ -275,3 +275,73 @@ def test_tool_call_without_marker_gives_normal_missing_store_error(tmp_path):
 
     result = _call(store_path, "run_list", host_repo=host)
     assert result.isError
+
+
+# ---- discovery mode: one registration, many projects -----------------------
+
+
+def _discovery_call(default_workspace: Path, tool: str, **kwargs):
+    """A server started with no --store, the way a globally-registered
+    client launches it."""
+
+    async def _run():
+        server = build_server(None, host_repo=default_workspace)
+        async with create_connected_server_and_client_session(server._mcp_server) as session:
+            return await session.call_tool(tool, kwargs)
+
+    return asyncio.run(_run())
+
+
+def _marked_project(root: Path, project_id: str) -> Path:
+    root.mkdir(parents=True)
+    LocalStore.init(
+        root.parent / f"{project_id}-store",
+        project_id=project_id,
+        phases=["build"],
+        host_repo=root,
+    )
+    return root
+
+
+def test_discovery_serves_each_workspace_its_own_store(tmp_path):
+    alpha = _marked_project(tmp_path / "alpha", "alpha")
+    beta = _marked_project(tmp_path / "beta", "beta")
+
+    for workspace, expected in ((alpha, "alpha"), (beta, "beta")):
+        result = _discovery_call(tmp_path, "context_bootstrap", workspace=str(workspace))
+        assert not result.isError
+        payload = result.structuredContent
+        assert payload["project"]["project_id"] == expected
+        assert payload["store"]["binding"] == "ok"
+        assert "warning" not in payload
+
+
+def test_discovery_workspace_sticks_across_calls(tmp_path):
+    alpha = _marked_project(tmp_path / "alpha", "alpha")
+    _marked_project(tmp_path / "beta", "beta")
+
+    async def _run():
+        server = build_server(None, host_repo=tmp_path / "beta")
+        async with create_connected_server_and_client_session(server._mcp_server) as session:
+            await session.call_tool("context_bootstrap", {"workspace": str(alpha)})
+            return await session.call_tool(
+                "memory_write",
+                {"namespace": "notes", "key": "n", "content": "hi", "push": False},
+            )
+
+    result = asyncio.run(_run())
+    assert not result.isError
+    assert tools.memory_read(LocalStore(tmp_path / "alpha-store"), "notes", "n") == "hi"
+    assert tools.memory_read(LocalStore(tmp_path / "beta-store"), "notes", "n") is None
+
+
+def test_discovery_refuses_an_unmarked_workspace(tmp_path):
+    _marked_project(tmp_path / "alpha", "alpha")
+    plain = tmp_path / "plain"
+    plain.mkdir()
+
+    result = _discovery_call(tmp_path / "alpha", "context_bootstrap", workspace=str(plain))
+    assert result.isError
+    message = result.content[0].text
+    assert ".redthread.yaml" in message
+    assert "redthread init" in message

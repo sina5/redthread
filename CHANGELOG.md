@@ -2,6 +2,38 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.12] - 2026-08-26
+
+### Added
+
+- **Discovery mode: one MCP registration, the right store in every repo.**
+  `redthread mcp-serve` with no `--store` now resolves the store per call
+  instead of pinning one for the life of the process. Each call walks up
+  from its workspace to the nearest committed `.redthread.yaml` and serves
+  the store that marker names. This is the fix for clients that keep a
+  single global MCP registration and reuse it for every project window
+  (Cursor's `~/.cursor/mcp.json`, Windsurf, VS Code's user-level
+  `mcp.json`), where one `--store` meant every repo wrote into the first
+  repo's store.
+
+  The workspace comes from the first source that answers: the new
+  `workspace` argument on `context_bootstrap` (also on `store_init`,
+  `memory_write`, and `agents_md_bootstrap`), which sticks for the rest of
+  the session; the client's declared MCP roots, asked for automatically;
+  the `REDTHREAD_WORKSPACE` environment variable; or the launch directory.
+  A workspace with no marker is refused, naming the `redthread init` /
+  `redthread attach` command that fixes it — never silently served another
+  project's store.
+
+- **`agents_md_bootstrap` now tells agents to pass `workspace`** on their
+  first `context_bootstrap` call, so a globally-registered server lands on
+  the right store without the user configuring anything per project.
+
+### Changed
+
+- `--store` is now optional on `mcp-serve`. Passing it keeps the previous
+  behaviour exactly, including the `store.binding` mismatch warning.
+
 ## [0.11] - 2026-08-25
 
 ### Fixed
