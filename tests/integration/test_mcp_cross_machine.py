@@ -8,6 +8,7 @@ proven for the MCP-facing surface, not just LocalStore directly.
 import subprocess
 
 from redthread.mcp import tools
+from redthread.sync import shared_syncer
 from redthread.store import LocalStore, gitio
 
 
@@ -40,6 +41,9 @@ def test_agent_memory_and_context_visible_on_fresh_clone(tmp_path):
     # Node A: an agent writes long-term memory and logs context via the
     # exact functions the MCP tools delegate to.
     tools.memory_write(store_a, "agent", "preferences.md", "Use uv, never conda.")
+    # memory_write pushes in the background; let it finish before syncing the
+    # same repo from this thread, so the two never contend for git's locks.
+    shared_syncer().wait(store_a.layout.root, timeout=30)
     run_id = tools.run_start(store_a)["run_id"]
     tools.context_log(store_a, "build", "decision", payload={"note": "chose approach X"})
     gitio.sync(store_a.layout.root, "agent memory + context from node A")
@@ -64,9 +68,11 @@ def test_memory_namespaces_are_independent_and_survive_sync_both_ways(tmp_path):
     store_b = _clone(remote, tmp_path, "clone-b")
 
     tools.memory_write(store_a, "node-a-notes", "a.md", "from A")
+    shared_syncer().wait(store_a.layout.root, timeout=30)
     gitio.sync(store_a.layout.root, "a writes")
 
     tools.memory_write(store_b, "node-b-notes", "b.md", "from B")
+    shared_syncer().wait(store_b.layout.root, timeout=30)
     gitio.sync(store_b.layout.root, "b writes")  # rebases past a, no conflict
 
     # store_b's own sync() already pulled A's prior commit before pushing.

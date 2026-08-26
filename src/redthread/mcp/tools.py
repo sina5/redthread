@@ -14,6 +14,7 @@ from typing import Any
 from redthread import __version__, constants, hostconfig, memory_port, update_check
 from redthread.models import Handoff
 from redthread.store import LocalStore, StoreError, gitio
+from redthread.sync import shared_syncer
 
 
 def resolve_run_id(store: LocalStore, run_id: str | None) -> str:
@@ -286,6 +287,9 @@ def handoff_get(store: LocalStore, phase: str, run_id: str | None = None) -> dic
 
 
 _PUSH_NEXT = {
+    "pushing": "Memory is written and committed; the push is running in the background. "
+    "Its outcome is reported by the next redthread call on this store (or sync_status), "
+    "and an unpushed commit is republished by any later sync, so nothing is ever lost.",
     "pushed": "Memory is written and pushed — other machines get it on their next sync.",
     "committed": "Memory is written and committed locally, but the store has no remote, "
     "so it hasn't left this machine yet.",
@@ -299,6 +303,72 @@ _PUSH_NEXT = {
 }
 
 
+def _sync_in_background(store: LocalStore, message: str) -> dict[str, Any]:
+    """Commit now (fast, local, makes the write durable), push later.
+
+    The synchronous version of this — pull --rebase, then push, inside the
+    tool call — made every memory write wait on two network round trips for
+    something that doesn't affect whether the write succeeded. The commit
+    stays synchronous so a durability failure is reported immediately; only
+    the network half moves to the background worker. A store without a
+    remote skips the worker entirely: `sync_report` is local-only there and
+    its `committed` detail explains how to add one.
+    """
+    root = store.layout.root
+    if not gitio.has_remote(root):
+        return gitio.sync_report(root, message)
+    try:
+        gitio.commit_if_dirty(root, message)
+    except (gitio.GitError, OSError) as e:
+        return {"status": "failed", "detail": str(e)}
+    return shared_syncer().schedule(root, message)
+
+
+def _push_next_text(sync: dict[str, Any]) -> str:
+    next_text = _PUSH_NEXT[sync["status"]]
+    if sync.get("detail"):
+        next_text = f"{next_text} ({sync['detail']})"
+    previous = sync.get("previous")
+    if previous is not None:
+        next_text = (
+            f"{next_text} NOTE: the previous background push of this store FAILED "
+            f"({previous.get('detail', 'no detail')}) — report this, and run "
+            "`redthread sync --store <store>` to publish the stranded commits."
+        )
+    return next_text
+
+
+def sync_status(store: LocalStore) -> dict[str, Any]:
+    """Where this store stands against its remote: whether a background push
+    is in flight, how the last one ended, and how many commits have not
+    been published yet."""
+    root = store.layout.root
+    syncer = shared_syncer()
+    status: dict[str, Any] = {
+        "project_id": store.manifest.project_id,
+        "has_remote": gitio.has_remote(root),
+        "in_flight": syncer.in_flight(root),
+        "last_push": syncer.last_report(root),
+        "unpushed_commits": gitio.ahead_count(root),
+        "dirty": gitio.is_dirty(root),
+    }
+    if status["in_flight"]:
+        status["_next"] = "A background push is running — call again to see how it ended."
+    elif not status["has_remote"]:
+        status["_next"] = (
+            "No remote on the store repo, so memory can't leave this machine — add one "
+            "with `git -C <store> remote add origin <url>`."
+        )
+    elif status["unpushed_commits"] or status["dirty"]:
+        status["_next"] = (
+            "Unpublished local state — the next write pushes it, or run "
+            "`redthread sync --store <store>` to publish now."
+        )
+    else:
+        status["_next"] = "Fully published — the remote has everything."
+    return status
+
+
 def memory_write(
     store: LocalStore,
     namespace: str,
@@ -308,14 +378,14 @@ def memory_write(
     tags: list[str] | None = None,
     push: bool = True,
 ) -> dict[str, Any]:
-    """Write a memory entry and, by default, commit+push the store.
+    """Write a memory entry and, by default, commit it and start a push.
 
     Pushing is the default because an unpushed memory is invisible to the
     next machine, which is the whole point of the store — and an agent that
-    has to remember a second call will sometimes not make it. A failed push
-    is reported in the result rather than raised: the entry is already on
-    disk, and turning that into an exception would tell the caller its write
-    failed when it didn't.
+    has to remember a second call will sometimes not make it. The push runs
+    in the background (`status: pushing`) so the caller never waits on the
+    network; a push failure is surfaced by the next call on this store, and
+    the entry itself is already committed either way.
     """
     store.memory_write(namespace, key, content, description=description, tags=tags)
     # Naming the project written to costs nothing and is the last chance to
@@ -328,14 +398,11 @@ def memory_write(
         "project_id": store.manifest.project_id,
     }
     if push:
-        sync = gitio.sync_report(store.layout.root, f"redthread: memory {namespace}/{key}")
+        sync = _sync_in_background(store, f"redthread: memory {namespace}/{key}")
     else:
         sync = {"status": "skipped"}
     result["sync"] = sync
-    next_text = _PUSH_NEXT[sync["status"]]
-    if sync.get("detail"):
-        next_text = f"{next_text} ({sync['detail']})"
-    result["_next"] = next_text
+    result["_next"] = _push_next_text(sync)
     return result
 
 
@@ -425,16 +492,13 @@ def memory_import(
         return result
 
     if push:
-        sync = gitio.sync_report(
-            store.layout.root, f"redthread: import {len(imported)} entries into {namespace}"
+        sync = _sync_in_background(
+            store, f"redthread: import {len(imported)} entries into {namespace}"
         )
     else:
         sync = {"status": "skipped"}
     result["sync"] = sync
-    next_text = _PUSH_NEXT[sync["status"]]
-    if sync.get("detail"):
-        next_text = f"{next_text} ({sync['detail']})"
-    result["_next"] = next_text
+    result["_next"] = _push_next_text(sync)
     return result
 
 
@@ -490,10 +554,12 @@ def _agents_md_section(store_path: Path, project_id: str | None = None) -> str:
         "  always with a one-line `description`): what changed, why, validation\n"
         "  performed, follow-ups. Write when the task finishes, not batched at the\n"
         "  end of the session, and without being asked.\n"
-        "- `memory_write` commits and pushes the store for you by default, so\n"
-        "  memory reaches other machines without a second step. Check the `sync`\n"
-        "  field it returns; if it says `failed`, say so and fix it rather than\n"
-        "  leaving the entry stranded on this machine.\n"
+        "- `memory_write` commits synchronously and pushes in the background, so\n"
+        "  memory reaches other machines without a second step and without making\n"
+        "  you wait on the network. Check the `sync` field it returns; if it says\n"
+        "  `failed`, or a later call reports a previous push FAILED, say so and\n"
+        "  fix it rather than leaving the entry stranded on this machine\n"
+        "  (`sync_status` confirms a push landed when that matters).\n"
         "- Store durable conventions and decisions under the `notes` namespace;\n"
         "  check `memory_search` first and update the existing entry instead of\n"
         "  adding a near-duplicate. Never store secrets.\n"

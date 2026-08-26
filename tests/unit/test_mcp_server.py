@@ -58,6 +58,7 @@ def test_all_tools_are_registered(tmp_path):
         "handoff_publish",
         "handoff_get",
         "memory_write",
+        "sync_status",
         "memory_read",
         "memory_list",
         "memory_search",
