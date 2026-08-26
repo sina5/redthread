@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [0.11] - 2026-08-25
 
+### Fixed
+
+- **A broken presentation stack no longer takes down the whole CLI.** The
+  CLI imported the `present` adapter (→ `python-pptx` → `lxml`, a native
+  DLL) at module import time, so an environment where that DLL cannot load
+  (observed: Windows Application Control blocking a freshly-installed
+  `lxml`) crashed *every* command — `mcp-serve` included. The import now
+  happens inside the `present` command, the only place that needs it.
+
 ### Changed
 
 - **`memory_write` no longer blocks on the network.** The MCP tools
