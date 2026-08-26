@@ -5,6 +5,7 @@ import pytest
 
 from redthread.mcp import tools
 from redthread.store import LocalStore, StoreError, gitio
+from redthread.sync import shared_syncer
 
 
 def _store(tmp_path):
@@ -346,8 +347,9 @@ def test_memory_import_pushes_once_for_the_whole_batch(tmp_path):
 
     report = tools.memory_import(store, source, namespace="ported")
 
-    assert report["sync"]["status"] == "pushed"
-    assert "pushed" in report["_next"]
+    assert report["sync"]["status"] == "pushing"
+    assert "background" in report["_next"]
+    assert shared_syncer().wait(store.layout.root, timeout=30)["status"] == "pushed"
     log = subprocess.run(
         ["git", "log", "--oneline"],
         cwd=store.layout.root,
@@ -425,7 +427,9 @@ def test_memory_write_pushes_to_the_remote_by_default(tmp_path):
 
     written = tools.memory_write(store, "notes", "uv.md", "Use uv.", description="Toolchain")
 
-    assert written["sync"] == {"status": "pushed"}
+    # The push happens in the background; the write itself never waits on it.
+    assert written["sync"]["status"] == "pushing"
+    assert shared_syncer().wait(store.layout.root, timeout=30)["status"] == "pushed"
     # Present on the remote, not just committed locally.
     listed = subprocess.run(
         ["git", "ls-tree", "-r", "--name-only", "main"],
@@ -452,11 +456,17 @@ def test_memory_write_reports_a_failed_push_without_losing_the_entry(tmp_path):
 
     written = tools.memory_write(store, "notes", "uv.md", "Use uv.")
 
-    assert written["sync"]["status"] == "failed"
-    assert written["sync"]["detail"]
-    assert "failed" in written["_next"]
+    assert written["sync"]["status"] == "pushing"
+    report = shared_syncer().wait(store.layout.root, timeout=30)
+    assert report["status"] == "failed"
+    assert report["detail"]
     # The point of not raising: the entry is still readable.
     assert tools.memory_read(store, "notes", "uv.md") == "Use uv."
+    # And the failure reaches the caller on its next write to this store.
+    second = tools.memory_write(store, "notes", "again.md", "More.")
+    assert second["sync"]["previous"]["status"] == "failed"
+    assert "FAILED" in second["_next"]
+    shared_syncer().wait(store.layout.root, timeout=30)
 
 
 def test_memory_write_without_a_remote_says_it_never_left_this_machine(tmp_path):

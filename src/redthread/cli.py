@@ -8,7 +8,6 @@ from typing import Annotated
 import typer
 
 from redthread import __version__, hostconfig
-from redthread.adapters.present import run_present
 from redthread.mcp import tools as mcp_tools
 from redthread.mcp.server import main as run_mcp_server
 from redthread.models import Handoff
@@ -613,6 +612,12 @@ def present(
     store: StoreOpt = Path("./redthread-store"),
 ) -> None:
     """Render report.md, deck.pptx, and a docs/ tree from upstream handoffs."""
+    # Imported here, not at module top: the deck renderer pulls in pptx/lxml
+    # (native DLLs a hardened Windows can refuse to load), and a broken or
+    # missing presentation stack must not take down every other command —
+    # mcp-serve especially.
+    from redthread.adapters.present import run_present
+
     s = _open(store)
     try:
         handoff = run_present(s, run_id, output_dir, phase=phase)

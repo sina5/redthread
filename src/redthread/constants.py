@@ -78,6 +78,12 @@ SYNC_RETRY_BACKOFF_CAP_SECONDS = 5
 SYNC_DAEMON_INTERVAL_SECONDS = 10.0
 """Poll interval for the auto-commit daemon (architecture target: 5-15s)."""
 
+BACKGROUND_SYNC_DRAIN_SECONDS = 30.0
+"""How long process exit waits for in-flight background pushes. Long enough
+for a healthy push to finish, short enough that a dead network can't hold
+the process hostage — a stranded push costs nothing but latency, since the
+commit is local and the next sync from anywhere publishes it."""
+
 # ----- adapters -------------------------------------------------------------
 
 METRIC_BATCH_SIZE = 50

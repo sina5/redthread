@@ -43,8 +43,9 @@ def build_server(
             "newest active run. Phases come from this store's own declared "
             "pipeline. Read handoffs, not raw entries, when picking up "
             "another phase's work. Write memory before you finish, not after "
-            "you're asked — memory_write commits and pushes the store for "
-            "you, so no separate sync step is needed."
+            "you're asked — memory_write commits your entry and pushes it "
+            "in the background, so no separate sync step is needed and the "
+            "call returns without waiting on the network."
         ),
     )
 
@@ -224,15 +225,25 @@ def build_server(
         history. The returned `project_id` names the project actually
         written to; if it isn't this one, say so rather than continuing.
 
-        The store is committed and pushed automatically; the returned `sync`
-        field says what happened (`pushed`, `committed`, `no_changes`, or
-        `failed` with a `detail`). A failed push never loses the entry — it
-        is already on disk — but do report it rather than assuming the
-        memory travelled. Pass push=False only to batch several writes and
+        The store is committed synchronously and pushed in the background;
+        the returned `sync` field says what happened (`pushing`, `committed`,
+        `failed` with a `detail`, …). `pushing` means the entry is already
+        safe locally and the network half is running — its outcome is
+        reported by the next call on this store, and `sync_status` can
+        confirm the push landed when that matters. A failed push never
+        loses the entry. Pass push=False only to batch several writes and
         sync once at the end."""
         return tools.memory_write(
             _store(), namespace, key, content, description=description, tags=tags, push=push
         )
+
+    @mcp.tool()
+    def sync_status() -> dict[str, Any]:
+        """Where this store stands against its remote: whether a background
+        push is in flight, how the last one ended, and how many commits are
+        not published yet. Check it before ending a session if the last
+        memory_write reported `pushing` and the push must be confirmed."""
+        return tools.sync_status(_store())
 
     @mcp.tool()
     def memory_read(namespace: str, key: str) -> str | None:

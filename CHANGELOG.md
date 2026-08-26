@@ -2,6 +2,43 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.11] - 2026-08-25
+
+### Fixed
+
+- **A broken presentation stack no longer takes down the whole CLI.** The
+  CLI imported the `present` adapter (→ `python-pptx` → `lxml`, a native
+  DLL) at module import time, so an environment where that DLL cannot load
+  (observed: Windows Application Control blocking a freshly-installed
+  `lxml`) crashed *every* command — `mcp-serve` included. The import now
+  happens inside the `present` command, the only place that needs it.
+
+### Changed
+
+- **`memory_write` no longer blocks on the network.** The MCP tools
+  `memory_write` and `memory_import` used to run the full
+  commit → pull --rebase → push sequence synchronously inside the tool
+  call, so every write paid two network round trips while an agent (and a
+  human) waited — long enough on a slow link that users interrupted it.
+  The commit stays synchronous (it is what makes the write durable, and a
+  durability failure is still reported immediately); the pull+push now
+  runs on a per-store background worker (`redthread.sync.background`),
+  and the tool returns at local-disk speed with `sync.status: "pushing"`.
+  - At most one push per store is in flight; commits that land mid-push
+    set a rerun flag on the same worker, so bursts of writes coalesce and
+    nothing committed after a push started is left behind.
+  - A failed background push is not swallowed: the next `memory_write` on
+    the store attaches it under `sync.previous` and calls it out in
+    `_next`, and the new `sync_status` MCP tool reports in-flight state,
+    the last push outcome, and the count of unpublished commits on demand.
+  - Process exit drains in-flight pushes for up to
+    `BACKGROUND_SYNC_DRAIN_SECONDS` (30s); a push cut off by a hard kill
+    costs nothing but latency, since the commit is local and any later
+    sync republishes it.
+  - Stores without a remote keep the old fully-synchronous (and fully
+    local) `committed` report; the `redthread` CLI and the auto-commit
+    daemon are unchanged.
+
 ## [0.10] - 2026-08-17
 
 ### Fixed

@@ -63,9 +63,10 @@ installed at all, run the one-time setup first, before other work.
    Update the existing entry rather than adding a near-duplicate — check
    `memory_search` first.
 5. **Never store secrets.** The store is a git repo with a shared remote.
-6. **`memory_write` commits and pushes for you.** Check the `sync` field it
-   returns; if it says `failed`, say so and fix it instead of leaving the
-   entry stranded on this machine.
+6. **`memory_write` commits for you and pushes in the background.** Check
+   the `sync` field it returns; if it says `failed`, or a later call
+   reports a previous push failed, say so and fix it instead of leaving
+   the entry stranded on this machine.
 7. **Subagents don't inherit this file.** When delegating work worth
    remembering, tell the subagent to call `context_bootstrap` too, and to
    report back what belongs in memory.

@@ -409,6 +409,22 @@ def commit_if_dirty(repo: Path, message: str) -> bool:
     return True
 
 
+def ahead_count(repo: Path, remote: str = "origin") -> int | None:
+    """Commits on HEAD that the remote branch doesn't have, or None when
+    there is nothing to compare against (no remote, or a branch the remote
+    has never seen). Local-only — it compares against the last-fetched ref,
+    which is exactly what "not yet published by us" means here."""
+    branch = current_branch(repo)
+    if not branch or not has_remote(repo, remote):
+        return None
+    result = _run(
+        ["rev-list", "--count", f"{remote}/{branch}..HEAD"], cwd=repo, check=False
+    )
+    if result.returncode != 0:
+        return None
+    return int(result.stdout.strip())
+
+
 def pull_rebase(repo: Path, remote: str = "origin") -> None:
     branch = current_branch(repo)
     result = _run(["pull", "--rebase", "-q", remote, branch], cwd=repo, check=False)

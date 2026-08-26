@@ -125,15 +125,18 @@ Five conveniences worth knowing before you wire an agent up:
   those descriptions so an agent can tell what's worth opening without
   reading every entry. `memory_search` covers keys, descriptions, tags, and
   bodies.
-- **Writing memory publishes it.** `memory_write` commits and pushes the
-  store by default, because an agent that has to remember a second `sync`
-  call sometimes won't — and unpushed memory is invisible to the next
-  machine, which is the point of the store. The result carries a `sync`
-  field (`pushed`, `committed`, `no_changes`, or `failed` with a `detail`);
-  a failed push is reported there rather than raised, since the entry is
-  already safely on disk. Pass `push=False` to batch several writes and
-  sync once at the end. Same for the CLI: `redthread memory write` pushes
-  unless you pass `--no-push`.
+- **Writing memory publishes it.** `memory_write` commits the entry
+  synchronously and pushes in the background, because an agent that has to
+  remember a second `sync` call sometimes won't — and unpushed memory is
+  invisible to the next machine, which is the point of the store. The call
+  returns at local-disk speed with `sync.status: "pushing"` (`committed`
+  when the store has no remote, `failed` with a `detail` when the commit
+  itself failed); a failed background push is surfaced by the next call on
+  the store under `sync.previous`, and the `sync_status` tool reports the
+  in-flight state, last push outcome, and unpublished-commit count on
+  demand. Pass `push=False` to batch several writes and sync once at the
+  end. The CLI runs one-shot processes, so `redthread memory write` still
+  pushes synchronously unless you pass `--no-push`.
 - **Memory you already have can be ported in.** `memory_import` (or
   `redthread memory import <path>`) turns a file or a directory of notes
   into memory entries — one text file per entry — so a project that arrives
@@ -366,9 +369,10 @@ It is the only memory that counts here.
   `sessions`, key like `2026-07-18_short-slug`): what changed, why,
   validation done, follow-ups. Write when the task finishes, not batched at
   the end of the session, and without being asked.
-- `memory_write` commits and pushes the store for you, so memory reaches
-  other machines without a second step. Check the `sync` field it returns
-  and fix it if it says `failed`.
+- `memory_write` commits your entry and pushes it in the background, so
+  memory reaches other machines without a second step and without waiting
+  on the network. Check the `sync` field it returns and fix it if it says
+  `failed` — or if a later call reports a previous push failed.
 - Store durable conventions and decisions under the `notes` namespace;
   never store secrets.
 - If the MCP server isn't connected, use the CLI on the same store rather
