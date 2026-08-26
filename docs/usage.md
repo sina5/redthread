@@ -97,6 +97,7 @@ redthread project add-phase deploy --store ./my-store
 
 ```bash
 redthread mcp-serve [--store PATH] [--host-repo PATH] [--allow-clone]
+redthread mcp-serve   # discovery mode: one registration, every project
 ```
 
 Runs an MCP server (stdio) exposing the store as 18 tools:
@@ -159,6 +160,51 @@ boundary). This is what makes a second machine's setup just "clone the
 code repo, register the same MCP command" — no `redthread init`/`attach`
 step required if the store already exists somewhere. See [Finding the
 store again on another machine](#finding-the-store-again-on-another-machine).
+
+### One registration, many projects (discovery mode)
+
+`--store` pins the server to one store for its whole life. That is right
+for clients that register MCP servers per project (Claude Code's
+`.mcp.json`), and wrong for clients that keep a single global registration
+and reuse it for every window they open — Cursor's `~/.cursor/mcp.json`,
+Windsurf, VS Code's user-level `mcp.json`. There, one `--store` means every
+repo talks to the *first* repo's store.
+
+Omit `--store` and the server runs in **discovery mode**: it decides the
+store per call instead of per process.
+
+```bash
+redthread mcp-serve
+```
+
+Each call resolves a workspace, walks up from it to the nearest
+`.redthread.yaml`, and serves the store that marker names. The workspace
+comes from the first of these that answers:
+
+1. the `workspace` argument on `context_bootstrap` (also accepted by
+   `store_init`, `memory_write`, and `agents_md_bootstrap`) — the agent
+   passes the absolute path of the project it has open. It sticks for the
+   rest of the session, so later calls need not repeat it.
+2. the client's declared MCP **roots**, asked for automatically when
+   `context_bootstrap` is called without a `workspace`.
+3. `REDTHREAD_WORKSPACE`, for clients that can expand a workspace variable
+   into a server's `env`.
+4. the directory the server was launched in (`--host-repo`, default `.`).
+
+A workspace with no marker in it or any parent is refused, with the
+`redthread init` / `redthread attach` command that would fix it — the
+server never falls back to some other project's store, because a silent
+fallback is exactly the misfiled memory this mode exists to prevent. So
+every repo that should have memory needs its marker committed; `redthread
+init --worktree-repo .` and `redthread attach --host-repo .` both write and
+commit one.
+
+!!! note "Pinned mode is unchanged"
+    Passing `--store` keeps the old behaviour exactly, including the
+    `store.binding` check that warns when the served store doesn't belong
+    to the workspace. Discovery mode makes that warning unnecessary rather
+    than replacing it: the store it picks is by construction the one the
+    workspace declares.
 
 !!! tip "Skip the manual AGENTS.md paste"
     Once the server is registered, ask the agent to call
@@ -231,6 +277,26 @@ Pick your client — each tab is ready to paste as-is.
       }
     }
     ```
+
+    **Registering globally?** Cursor reuses one `~/.cursor/mcp.json` entry
+    for every project window, so a hard-coded `--store` sends every repo's
+    memory to the first repo's store. Drop `--store` instead and let each
+    project's own `.redthread.yaml` pick its store:
+
+    ```json
+    {
+      "mcpServers": {
+        "redthread": {
+          "command": "uvx",
+          "args": ["redthread", "mcp-serve"]
+        }
+      }
+    }
+    ```
+
+    See [One registration, many
+    projects](#one-registration-many-projects-discovery-mode). The same
+    applies to Windsurf and to VS Code's user-level `mcp.json`.
 
 === "🔵 VS Code (Copilot)"
 

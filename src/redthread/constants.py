@@ -36,6 +36,15 @@ a conflict in a file that has no semantic conflict at all.
 MEMORY_DOC_FENCE = "---"
 AGENTS_MD_MARKER = "<!-- redthread:agent-instructions -->"
 
+WORKSPACE_ENV_VAR = "REDTHREAD_WORKSPACE"
+"""Names the project directory for a globally-registered MCP server.
+
+Clients that keep one MCP registration for every window (Cursor,
+Windsurf, VS Code) launch the server with a working directory that says
+nothing about which project is open. Where such a client can expand a
+workspace variable into a server's `env`, this is the knob that tells
+discovery mode where to start looking."""
+
 # ----- git transport --------------------------------------------------------
 
 GIT_TIMEOUT_SECONDS = 60

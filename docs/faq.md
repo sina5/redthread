@@ -98,8 +98,25 @@ suite on Windows, macOS, and Ubuntu on every change. Store paths are
 always POSIX-relative internally, so stores move cleanly between
 operating systems.
 
+## I registered the MCP server once in Cursor and now every repo gets the same memory. Why?
+
+Because `--store` pins the server to one store, and Cursor (like Windsurf
+and VS Code's user-level config) reuses a single global registration for
+every project window. The store never changes, so project B's session notes
+land in project A's history.
+
+Drop `--store` from the registration. With no store pinned, `mcp-serve`
+runs in discovery mode and resolves the store per call from the workspace's
+own committed `.redthread.yaml` marker — one registration, the right store
+in every repo. A repo with no marker is refused rather than silently served
+someone else's store; `redthread init --worktree-repo .` (new store) or
+`redthread attach --host-repo .` (store already exists) writes and commits
+one. Details in [One registration, many
+projects](usage.md#one-registration-many-projects-discovery-mode).
+
 ## What's the license?
 
 MIT. The source is at
 [github.com/sina5/redthread](https://github.com/sina5/redthread) —
 issues and pull requests are welcome.
+

@@ -628,12 +628,22 @@ def present(
 
 @app.command("mcp-serve")
 def mcp_serve(
-    store: StoreOpt = Path("./redthread-store"),
+    store: Annotated[
+        Path | None,
+        typer.Option(
+            "--store",
+            help="Path to the Redthread store to serve. Omit to run in discovery mode, "
+            "where each call is served the store named by its own workspace's "
+            ".redthread.yaml — use that when one MCP registration is shared by every "
+            "project (Cursor, Windsurf, VS Code)",
+        ),
+    ] = None,
     host_repo: Annotated[
         Path,
         typer.Option(
-            help="Repo to look for .redthread.yaml in if --store doesn't exist yet "
-            "(defaults to the current directory, which is normally the project root)"
+            help="Project directory to resolve the store from when a call names no "
+            "workspace (defaults to the current directory, which is normally the "
+            "project root)"
         ),
     ] = Path("."),
     allow_clone: Annotated[
@@ -644,8 +654,10 @@ def mcp_serve(
         ),
     ] = False,
 ) -> None:
-    """Run the MCP server (stdio) exposing this store as agent memory."""
-    run_mcp_server(Path(store), host_repo=Path(host_repo), allow_clone=allow_clone)
+    """Run the MCP server (stdio) exposing a store as agent memory."""
+    run_mcp_server(
+        Path(store) if store else None, host_repo=Path(host_repo), allow_clone=allow_clone
+    )
 
 
 if __name__ == "__main__":

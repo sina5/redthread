@@ -5,7 +5,7 @@ Portable, git-backed memory for AI agents and multi-phase workflows.
 [![CI](https://github.com/sina5/redthread/actions/workflows/ci.yml/badge.svg)](https://github.com/sina5/redthread/actions/workflows/ci.yml)
 [![Docs](https://github.com/sina5/redthread/actions/workflows/docs.yml/badge.svg)](https://sina5.github.io/redthread/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.11-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.12-blue.svg)](CHANGELOG.md)
 
 ![Redthread — a red thread running through every phase of a pipeline](docs/assets/redthread.png)
 
@@ -28,6 +28,10 @@ Phase names are data, not code: every project declares its own pipeline in
 - **Agent memory over MCP** — point a coding agent's MCP config (Claude
   Code, Cursor, Windsurf, VS Code, ...) at a Redthread store instead of a
   local `.claude`/`.agent` folder.
+- **One registration, many projects** — run `mcp-serve` with no `--store`
+  and every workspace is served the store its own committed
+  `.redthread.yaml` names, so a single global MCP entry (Cursor, Windsurf,
+  VS Code) works across all your repos instead of binding to the first one.
 - **Portable by construction** — every entry is keyed by `project_id` /
   `run_id` / `phase` / `entry_id`, never by hostname or absolute path. Swap
   the machine running a phase mid-run with `redthread resume`.

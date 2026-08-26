@@ -10,18 +10,30 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
-from redthread import __version__, hostconfig, update_check
+from redthread import __version__, constants, update_check
 from redthread.mcp import tools
+from redthread.mcp.routing import ClientRootsProbe, StoreRouter
 from redthread.store import LocalStore, StoreError
 
 
 def build_server(
-    store_path: Path, host_repo: Path | None = None, allow_clone: bool = False
+    store_path: Path | None = None, host_repo: Path | None = None, allow_clone: bool = False
 ) -> FastMCP:
-    store_path = Path(store_path)
+    """Build the server over one pinned store, or - with no ``store_path`` -
+    over whichever store the calling workspace declares.
+
+    Discovery mode exists for clients that keep a single global MCP
+    registration and reuse it for every project window; see
+    :mod:`redthread.mcp.routing`.
+    """
+    store_path = Path(store_path) if store_path else None
     host_repo = Path(host_repo) if host_repo else Path.cwd()
+    router = StoreRouter(
+        fixed_store=store_path, default_workspace=host_repo, allow_clone=allow_clone
+    )
+    roots_probe = ClientRootsProbe()
     mcp = FastMCP(
         "redthread",
         instructions=(
@@ -29,13 +41,16 @@ def build_server(
             "context_bootstrap first, every session, before any other tool "
             "here — it returns this project's pipeline, recent runs, and the "
             "memory index in one call, and tells you what to do next. "
-            "This server serves ONE store, and a client that registers it "
-            "globally reuses that registration for every workspace — so "
-            "before writing anything, check the `store.binding` field "
-            "context_bootstrap returns. If it is not `ok`, a `warning` field "
-            "explains why: stop, report it to the user, and do not write "
-            "memory, entries, or handoffs, because they would be filed under "
-            "another project and be invisible to this one. On a "
+            "Pass the absolute path of the project directory you are "
+            "working in as `workspace` on that first call: a client that "
+            "registers this server globally reuses one registration for "
+            "every project, and `workspace` is what picks that project's "
+            "own store. It sticks for the rest of the session. Then check "
+            "the `store.binding` field context_bootstrap returns. If it is "
+            "not `ok`, a `warning` field explains why: stop, report it to "
+            "the user, and do not write memory, entries, or handoffs, "
+            "because they would be filed under another project and be "
+            "invisible to this one. On a "
             "new project also call agents_md_bootstrap; it's idempotent, so "
             "calling it every session is fine, and it's what makes future "
             "sessions use this memory without being told. Run-scoped tools "
@@ -49,31 +64,41 @@ def build_server(
         ),
     )
 
-    def _ensure_attached() -> None:
-        # A marker but no store yet means another machine already set this
-        # project up — attach automatically instead of erroring. No marker
-        # at all is a genuinely fresh project; store_init creates one below.
-        if not (store_path / "project.yaml").exists() and hostconfig.read_host_config(host_repo):
-            hostconfig.attach(host_repo, store_path, allow_clone=allow_clone)
-
-    def _store() -> LocalStore:
-        _ensure_attached()
-        return LocalStore(store_path)
+    def _store(workspace: str | None = None) -> LocalStore:
+        return router.resolve(workspace).store
 
     @mcp.tool()
-    def store_init(project_id: str, phases: list[str], name: str | None = None) -> dict[str, Any]:
+    def store_init(
+        project_id: str,
+        phases: list[str],
+        name: str | None = None,
+        workspace: str | None = None,
+    ) -> dict[str, Any]:
         """Create the store this server points at, if it doesn't exist yet.
         If a .redthread.yaml marker points here and another machine already
-        populated the store, attaches to it instead of erroring."""
-        _ensure_attached()
-        if (store_path / "project.yaml").exists():
-            return LocalStore(store_path).manifest.model_dump(mode="json")
-        store = LocalStore.init(store_path, project_id=project_id, phases=phases, name=name)
+        populated the store, attaches to it instead of erroring.
+        In discovery mode (the server started with no --store) the workspace
+        must already declare a store with a .redthread.yaml marker, which
+        `redthread init` writes."""
+        _, target = router.ensure_attached(workspace)
+        if (target / constants.PROJECT_FILENAME).exists():
+            return _store(workspace).manifest.model_dump(mode="json")
+        store = LocalStore.init(target, project_id=project_id, phases=phases, name=name)
+        router.forget(target)
         return store.manifest.model_dump(mode="json")
 
+    async def _workspace_from_client(ctx: Context) -> str | None:
+        """Ask the client which directory is open, if it implements roots."""
+        root = await roots_probe.probe(ctx.session)
+        return str(root) if root else None
+
     @mcp.tool()
-    def context_bootstrap(
-        run_id: str | None = None, recent_runs: int = 5, memory_limit: int = 100
+    async def context_bootstrap(
+        run_id: str | None = None,
+        recent_runs: int = 5,
+        memory_limit: int = 100,
+        workspace: str | None = None,
+        ctx: Context | None = None,
     ) -> dict[str, Any]:
         """START HERE. One call that orients you in this project: its phase
         pipeline, recent runs and their status, published handoffs, and the
@@ -89,13 +114,22 @@ def build_server(
         `mismatch` (this repo's .redthread.yaml names a different store).
         Anything but `ok` comes with a `warning` field — read it and stop
         before writing, rather than filing this project's work under
-        another project."""
+        another project.
+
+        Pass `workspace` — the absolute path of the project directory you
+        are working in — whenever you know it. One MCP registration is
+        commonly shared by every project a client has open, and `workspace`
+        is what selects that project's own store; it sticks for the rest of
+        the session, so later calls need not repeat it."""
+        if workspace is None and ctx is not None:
+            workspace = await _workspace_from_client(ctx)
+        resolved = router.resolve(workspace, bind=True)
         return tools.context_bootstrap(
-            _store(),
+            resolved.store,
             run_id=run_id,
             recent_runs=recent_runs,
             memory_limit=memory_limit,
-            workspace=host_repo,
+            workspace=resolved.workspace,
         )
 
     @mcp.tool()
@@ -210,6 +244,7 @@ def build_server(
         description: str | None = None,
         tags: list[str] | None = None,
         push: bool = True,
+        workspace: str | None = None,
     ) -> dict[str, Any]:
         """Write a long-term memory file (not tied to any run), portable
         across every machine that clones this store. Always pass a one-line
@@ -234,7 +269,13 @@ def build_server(
         loses the entry. Pass push=False only to batch several writes and
         sync once at the end."""
         return tools.memory_write(
-            _store(), namespace, key, content, description=description, tags=tags, push=push
+            _store(workspace),
+            namespace,
+            key,
+            content,
+            description=description,
+            tags=tags,
+            push=push,
         )
 
     @mcp.tool()
@@ -298,19 +339,22 @@ def build_server(
         )
 
     @mcp.tool()
-    def agents_md_bootstrap(project_dir: str | None = None) -> dict[str, Any]:
+    def agents_md_bootstrap(
+        project_dir: str | None = None, workspace: str | None = None
+    ) -> dict[str, Any]:
         """Add a short Redthread usage policy to this project's AGENTS.md
         (or CLAUDE.md, if that's the one that already exists) so agents use
         this store as memory automatically in future sessions, without
         being told each time. Idempotent — call this first, before any
         other tool, on every session; it's a no-op once already present.
-        project_dir defaults to the server's working directory."""
-        target_dir = Path(project_dir) if project_dir else Path.cwd()
+        project_dir defaults to this session's workspace."""
+        target_dir = Path(project_dir) if project_dir else router.workspace_for(workspace)
+        target_store = router.store_path_for(workspace)
         try:
-            project_id = _store().manifest.project_id
+            project_id = _store(workspace).manifest.project_id
         except StoreError:
             project_id = None  # store not created yet; the policy still applies
-        return tools.agents_md_bootstrap(store_path, target_dir, project_id)
+        return tools.agents_md_bootstrap(target_store, target_dir, project_id)
 
     # ---- resources -------------------------------------------------------
     # The same reads as the tools above, exposed as resources so clients that
@@ -384,7 +428,9 @@ def build_server(
     return mcp
 
 
-def main(store_path: Path, host_repo: Path | None = None, allow_clone: bool = False) -> None:
+def main(
+    store_path: Path | None = None, host_repo: Path | None = None, allow_clone: bool = False
+) -> None:
     _announce_update()
     build_server(store_path, host_repo=host_repo, allow_clone=allow_clone).run(transport="stdio")
 
