@@ -8,8 +8,8 @@ proven for the MCP-facing surface, not just LocalStore directly.
 import subprocess
 
 from redthread.mcp import tools
-from redthread.sync import shared_syncer
 from redthread.store import LocalStore, gitio
+from redthread.sync import shared_syncer
 
 
 def _bare_remote(tmp_path):
