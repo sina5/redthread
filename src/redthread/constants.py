@@ -33,6 +33,15 @@ Without `merge=union` two nodes appending entries in the same second produce
 a conflict in a file that has no semantic conflict at all.
 """
 
+INIT_COMMIT_MESSAGE = "redthread: initialize store"
+"""First commit on a new store's branch.
+
+Made at `init` time so the branch is a real ref from the start: an unborn
+branch has no `git log`, is missing from `git branch -a`, and leaves every
+file in the store untracked — indistinguishable, by inspection, from a
+setup that failed.
+"""
+
 MEMORY_DOC_FENCE = "---"
 AGENTS_MD_MARKER = "<!-- redthread:agent-instructions -->"
 
