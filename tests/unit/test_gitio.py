@@ -317,3 +317,68 @@ def test_sync_report_reports_a_hung_push_instead_of_hanging(tmp_path):
     # The write itself survived, which is the whole point.
     assert not gitio.is_dirty(repo)
     assert (repo / "memory.md").exists()
+
+
+def test_has_commits_is_false_on_an_unborn_branch(tmp_path):
+    """An unborn branch has no ref, so `git branch -a` doesn't list it and
+    everything in the work tree is untracked — the state that made a broken
+    store indistinguishable from an empty one."""
+    repo = _fresh_repo(tmp_path / "repo")
+    assert gitio.has_commits(repo) is False
+
+    (repo / "a.txt").write_text("hi", encoding="utf-8")
+    gitio.commit_if_dirty(repo, "first")
+    assert gitio.has_commits(repo) is True
+
+
+def test_uncommitted_paths_lists_each_untracked_file_not_its_directory(tmp_path):
+    repo = _fresh_repo(tmp_path / "repo")
+    (repo / "memory" / "notes").mkdir(parents=True)
+    (repo / "memory" / "notes" / "a.md").write_text("a", encoding="utf-8")
+    (repo / "memory" / "notes" / "b.md").write_text("b", encoding="utf-8")
+
+    assert gitio.uncommitted_paths(repo) == {"memory/notes/a.md", "memory/notes/b.md"}
+
+    gitio.commit_if_dirty(repo, "add notes")
+    assert gitio.uncommitted_paths(repo) == set()
+
+
+def test_commit_report_commits_without_touching_the_network(tmp_path):
+    remote = _bare_remote(tmp_path)
+    repo = _fresh_repo(tmp_path / "repo")
+    gitio.set_remote(repo, str(remote))
+    (repo / "a.txt").write_text("hi", encoding="utf-8")
+
+    report = gitio.commit_report(repo, "local only")
+
+    assert report == {"status": "committed"}
+    assert not gitio.is_dirty(repo)
+    assert gitio.ahead_count(repo) is None  # nothing was pushed
+    assert gitio.commit_report(repo, "again") == {"status": "no_changes"}
+
+
+def test_sync_report_names_the_remote_it_pushed_to(tmp_path):
+    remote = _bare_remote(tmp_path)
+    repo = _fresh_repo(tmp_path / "repo")
+    gitio.set_remote(repo, str(remote))
+    (repo / "a.txt").write_text("hi", encoding="utf-8")
+
+    report = gitio.sync_report(repo, "v1")
+
+    assert report["status"] == "pushed"
+    assert report["remote"] == str(remote)
+
+
+def test_store_status_reports_branch_commits_and_uncommitted_content(tmp_path):
+    repo = _fresh_repo(tmp_path / "repo")
+    (repo / "memory").mkdir()
+    (repo / "memory" / "a.md").write_text("a", encoding="utf-8")
+
+    status = gitio.store_status(repo)
+
+    assert status["branch"] == "main"
+    assert status["has_commits"] is False
+    assert status["dirty"] is True
+    assert status["uncommitted"] == ["memory/a.md"]
+    assert status["remote"] is None
+    assert status["worktree"] is False

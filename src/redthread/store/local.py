@@ -32,6 +32,7 @@ from redthread.models import (
 from redthread.store import gitio
 from redthread.store.errors import StoreError
 from redthread.store.layout import StoreLayout
+from redthread.store.publish import PublishPolicy
 
 _GITATTRIBUTES = constants.GITATTRIBUTES
 
@@ -58,6 +59,9 @@ class LocalStore:
         #: What `init`/`init_worktree` did with the host repo's marker commit
         #: (None when this store was merely opened, or publishing was off).
         self.marker_status: dict[str, Any] | None = None
+        #: What `init`/`init_worktree` did with the store's own first commit
+        #: (None when this store was merely opened).
+        self.init_commit: dict[str, str] | None = None
         self.layout = StoreLayout(Path(root))
         if not self.layout.project_yaml.exists():
             raise StoreError(
@@ -81,6 +85,7 @@ class LocalStore:
         name: str | None = None,
         host_repo: Path | None = None,
         publish_marker: bool = True,
+        publish: bool | None = None,
     ) -> "LocalStore":
         root = Path(root)
         layout = StoreLayout(root)
@@ -89,7 +94,7 @@ class LocalStore:
                 f"a Redthread store already exists at {root} — open it instead of "
                 "re-initializing (the store_init tool does this for you)"
             )
-        cls._write_initial_files(layout, project_id, phases, name)
+        cls._write_initial_files(layout, project_id, phases, name, publish)
         if not (root / ".git").exists():
             # Pin the branch name explicitly: relying on the ambient
             # init.defaultBranch config would make store repos diverge
@@ -99,6 +104,7 @@ class LocalStore:
                     ["git", "init", "-q", "-b", "main"], cwd=root, check=True, capture_output=True
                 )
         store = cls(root)
+        store.init_commit = gitio.commit_report(root, constants.INIT_COMMIT_MESSAGE)
         if host_repo is not None:
             cls._write_host_marker(host_repo, mode="repo", store_path=root)
             if publish_marker:
@@ -115,6 +121,7 @@ class LocalStore:
         phases: list[str],
         name: str | None = None,
         publish_marker: bool = True,
+        publish: bool | None = None,
     ) -> "LocalStore":
         """Create a store as an orphan-branch git worktree of `host_repo`,
         so the host repo's currently checked-out branch is never touched —
@@ -126,6 +133,11 @@ class LocalStore:
         `.redthread.yaml` marker is committed to its current branch — that
         commit is what lets the next clone find the store, and it touches
         those two paths only.
+
+        The scaffolding is committed on the orphan branch straight away, so
+        the branch exists as a real ref from the moment it is created: an
+        unborn branch is invisible to `git branch`, indistinguishable from a
+        broken setup, and everything in it is one `git clean -fdx` from gone.
         """
         host_repo = Path(host_repo)
         worktree_path = Path(worktree_path)
@@ -139,9 +151,10 @@ class LocalStore:
                 f"branch {branch!r} in {host_repo} already holds a store "
                 f"({worktree_path}); open it with LocalStore(...) instead"
             )
-        cls._write_initial_files(layout, project_id, phases, name)
+        cls._write_initial_files(layout, project_id, phases, name, publish)
         cls._write_host_marker(host_repo, mode="worktree", store_path=worktree_path, branch=branch)
         store = cls(worktree_path)
+        store.init_commit = gitio.commit_report(worktree_path, constants.INIT_COMMIT_MESSAGE)
         if publish_marker:
             store.marker_status = _publish_host_marker(host_repo, worktree_path)
         return store
@@ -174,13 +187,63 @@ class LocalStore:
 
     @staticmethod
     def _write_initial_files(
-        layout: StoreLayout, project_id: str, phases: list[str], name: str | None
+        layout: StoreLayout,
+        project_id: str,
+        phases: list[str],
+        name: str | None,
+        publish: bool | None = None,
     ) -> None:
-        manifest = ProjectManifest(project_id=project_id, name=name, phases=phases)
+        manifest = ProjectManifest(project_id=project_id, name=name, phases=phases, publish=publish)
         _dump_yaml(layout.project_yaml, manifest)
         _write_text(layout.gitattributes, _GITATTRIBUTES)
         layout.runs_dir.mkdir(parents=True, exist_ok=True)
+        # Git tracks files, not directories, so the empty scaffolding would
+        # vanish from the initial commit without something inside it.
         (layout.root / "memory").mkdir(exist_ok=True)
+        _write_text(layout.runs_dir / ".gitkeep", "")
+        _write_text(layout.root / "memory" / ".gitkeep", "")
+
+    # ---- publishing -------------------------------------------------------
+
+    def publish_policy(self) -> PublishPolicy:
+        """Whether memory in this store may be pushed to its git remote."""
+        return PublishPolicy.resolve(self.layout.root, self.manifest.publish)
+
+    def set_publish(self, enabled: bool | None) -> ProjectManifest:
+        """Record the project's publishing choice in `project.yaml`.
+
+        Args:
+            enabled: True to publish to the store's remote, False never to,
+                None to fall back to the default for this store's mode.
+
+        Returns:
+            The updated manifest.
+        """
+        updated = self.manifest.model_copy(update={"publish": enabled})
+        _dump_yaml(self.layout.project_yaml, updated)
+        self.manifest = updated
+        return updated
+
+    def uncommitted_memory_keys(self) -> set[str]:
+        """`namespace/key` for every memory entry not yet committed to git.
+
+        The distinction `memory_list` alone cannot make: an entry that only
+        exists as an untracked file is written but not durable, and reads as
+        a successful write from every other angle.
+        """
+        root = self.layout.root
+        if not gitio.is_repo(root):
+            return set()
+        prefix = "memory/"
+        keys: set[str] = set()
+        for path in gitio.uncommitted_paths(root):
+            if not path.startswith(prefix):
+                continue
+            rest = path[len(prefix) :]
+            namespace, _, key = rest.partition("/")
+            if key:
+                keys.add(f"{namespace}/{key}")
+        return keys
 
     def start_run(self, parent_run_id: str | None = None) -> RunRecord:
         run_id = new_ulid()
@@ -255,6 +318,7 @@ class LocalStore:
             name=self.manifest.name,
             phases=[*self.manifest.phases, phase],
             created_ts=self.manifest.created_ts,
+            publish=self.manifest.publish,
         )
         _dump_yaml(self.layout.project_yaml, updated)
         self.manifest = updated

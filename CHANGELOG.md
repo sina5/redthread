@@ -2,6 +2,65 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.13] - 2026-08-31
+
+Durability fixes, from a field report where four memory entries written
+with `--no-push` sat untracked on an unborn branch for a whole session and
+nothing said so.
+
+### Fixed
+
+- **`--no-push` no longer skips the commit.** `memory write --no-push` (and
+  `memory import --no-push`, and `push=False` on the `memory_write` /
+  `memory_import` MCP tools) declined committing as well as pushing, so an
+  entry written that way existed only as an untracked file — one
+  `git clean` from gone, and invisible to every other machine forever.
+  Committing is about durability and has no consequences off this machine;
+  pushing is about distribution. Only the second is optional now, and the
+  help text says so.
+
+- **`init` no longer leaves the store's branch unborn.** `redthread init`
+  (both modes) now commits the scaffolding it writes, so the branch is a
+  real ref from the start. An unborn branch does not appear in
+  `git branch -a`, makes `git log` fail outright, and leaves every file in
+  the store untracked — indistinguishable, by inspection, from a setup that
+  failed. The command reports whether that first commit landed.
+
+- **`memory write` says what happened.** It printed nothing at all on
+  success, so "written, committed, pushed" and "written and nothing else"
+  looked identical from the terminal. That silence is what let the bug
+  above survive four writes. It now prints one line — the status from
+  `sync_report`/`commit_report`, plus the remote it pushed to or the reason
+  it did not. `memory import` reports its sync outcome too.
+
+- **`memory list` can tell written from durable.** It reads the working
+  tree, so it happily listed entries that were not committed — while being
+  the natural way to check that a write worked. Uncommitted entries are now
+  marked `*` in the CLI (with a note on stderr) and carry
+  `uncommitted: true` in the `memory_list` MCP tool.
+
+### Added
+
+- **A worktree store no longer publishes to the host repo's remote by
+  default.** A git worktree shares its parent repository's remotes, so a
+  `--worktree-repo` store — presented as separate from the project, on its
+  own orphan branch, gitignored in the host repo — was pushing memory to
+  the project's own origin, in the reported case a public GitHub repo
+  holding network topology and firewall notes. Such a store now commits
+  locally and publishes only once told to. New `redthread publish` reports
+  or sets that per store (`--enable` / `--disable` / `--default`), and
+  `redthread init` takes `--publish` / `--no-publish`; the choice is stored
+  in `project.yaml`, so it travels with the store. A store with its own
+  repo is unaffected and still publishes by default.
+
+- **`redthread status`**: whether this store's content is actually safe —
+  branch, whether it has commits, remote, whether it publishes and why,
+  unpushed commit count, and any uncommitted memory entry. The `sync_status`
+  MCP tool reports the same publishing state.
+
+- `sync_report` now names the remote it pushed to, so a caller can see
+  where memory went rather than only that it went.
+
 ## [0.12] - 2026-08-26
 
 ### Added

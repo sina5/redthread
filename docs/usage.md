@@ -136,8 +136,9 @@ Five conveniences worth knowing before you wire an agent up:
   the store under `sync.previous`, and the `sync_status` tool reports the
   in-flight state, last push outcome, and unpublished-commit count on
   demand. Pass `push=False` to batch several writes and sync once at the
-  end. The CLI runs one-shot processes, so `redthread memory write` still
-  pushes synchronously unless you pass `--no-push`.
+  end — the entry is committed either way, so declining to publish never
+  costs you durability. The CLI runs one-shot processes, so `redthread
+  memory write` still pushes synchronously unless you pass `--no-push`.
 - **Memory you already have can be ported in.** `memory_import` (or
   `redthread memory import <path>`) turns a file or a directory of notes
   into memory entries — one text file per entry — so a project that arrives
@@ -479,7 +480,7 @@ Memory isn't tied to any run — it's the durable half of the store.
 ```bash
 redthread memory write <namespace> <key> <file> [--description TEXT] [--tags a,b] [--no-push]
 redthread memory read <namespace> <key>
-redthread memory list [namespace]              # key + description per entry
+redthread memory list [namespace]              # key + description per entry ('*' = uncommitted)
 redthread memory search <query> [--namespace NS] [--limit N]
 redthread memory import <path> [--namespace NS] [--overwrite] [--no-recursive] [--tags a,b]
 ```
@@ -488,11 +489,49 @@ redthread memory import <path> [--namespace NS] [--overwrite] [--no-recursive] [
 shows, so it's worth passing every time — an entry nobody can identify from
 a listing is an entry nobody reads again.
 
-`memory write` commits and pushes the store afterwards, so the entry is on
-the remote as soon as it's written. Pass `--no-push` to write several
-entries and `redthread sync` once at the end. A failed push is a warning,
-not an error: the entry is already on disk, so the command still exits 0
-and tells you to sync once you've fixed the cause.
+`memory write` commits the store and pushes it afterwards, so the entry is
+on the remote as soon as it's written, and it prints one line saying which
+of those happened. Pass `--no-push` to write several entries and `redthread
+sync` once at the end: `--no-push` declines the *push* only — the entry is
+still committed, because nobody skipping a push is asking to lose their
+data. A failed push is a warning, not an error: the entry is already
+committed, so the command still exits 0 and tells you to sync once you've
+fixed the cause.
+
+`memory list` marks an entry with `*` when it exists only as a working-tree
+file. That is the difference between written and durable, and it is the one
+thing a listing that reads the working tree cannot otherwise tell you.
+
+## Is my memory actually safe?
+
+```bash
+redthread status --store ./my-store
+```
+
+One screen of the things that decide whether memory survives and travels:
+the branch (and whether it has any commits at all), the remote, whether
+this store publishes, how many commits are unpushed, and any memory entry
+that isn't committed yet.
+
+### Publishing
+
+Pushing is a separate decision from committing, because it is the one with
+consequences beyond your machine:
+
+```bash
+redthread publish --store ./my-store              # report the current setting
+redthread publish --enable --store ./my-store     # publish memory to the store's remote
+redthread publish --disable --store ./my-store    # commit locally, never push
+redthread publish --default --store ./my-store    # go back to the default for this store
+```
+
+A store with its own repo publishes by default. A **worktree store does
+not**: it shares the host repo's remotes, so an unqualified push would send
+memory wherever the project publishes its code — which is often a public
+repository nobody chose as a memory destination. Memory is committed
+locally on every write, and `redthread publish --enable` turns publishing
+on once you've decided that remote should hold it. The setting lives in the
+store's `project.yaml`, so it travels with the store.
 
 ```bash
 redthread memory write notes toolchain.md ./note.md \
@@ -542,7 +581,8 @@ How it behaves:
   entry (`imported` / `skipped (exists)` / `skipped (unchanged)`) and a
   tally.
 - **One commit for the batch.** The whole import is committed and pushed
-  once, not once per entry. `--no-push` opts out.
+  once, not once per entry. `--no-push` opts out of the push; the commit
+  still happens.
 - **A bad file doesn't sink the batch.** Anything unreadable or non-UTF-8
   is reported on stderr and counted as `failed`; everything else still
   lands.

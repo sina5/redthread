@@ -441,13 +441,17 @@ def test_memory_write_pushes_to_the_remote_by_default(tmp_path):
     assert "memory/notes/uv.md" in listed
 
 
-def test_memory_write_with_push_false_leaves_the_entry_uncommitted(tmp_path):
+def test_memory_write_with_push_false_still_commits_the_entry(tmp_path):
+    """push=False declines publishing, never durability: the commit is local,
+    has no consequences off this machine, and is the only thing standing
+    between a written entry and a `git clean` that deletes it."""
     store, _ = _remote_store(tmp_path)
 
     written = tools.memory_write(store, "notes", "uv.md", "Use uv.", push=False)
 
-    assert written["sync"] == {"status": "skipped"}
-    assert gitio.is_dirty(store.layout.root)
+    assert written["sync"]["status"] == "committed"
+    assert "push=False" in written["sync"]["detail"]
+    assert not gitio.is_dirty(store.layout.root)
 
 
 def test_memory_write_reports_a_failed_push_without_losing_the_entry(tmp_path):
@@ -551,3 +555,29 @@ def test_agents_md_bootstrap_pins_the_expected_project_id(tmp_path):
     text = (project_dir / "AGENTS.md").read_text(encoding="utf-8")
     assert "`demo`" in text
     assert "STOP" in text
+
+
+def test_memory_list_flags_entries_that_are_only_working_tree_files(tmp_path):
+    store = _store(tmp_path)
+    gitio.configure_identity(store.layout.root, "Test", "test@example.com")
+    tools.memory_write(store, "notes", "committed.md", "safe", push=False)
+    (store.layout.root / "memory" / "notes" / "stray.md").write_text("loose", encoding="utf-8")
+
+    listed = {item["key"]: item["uncommitted"] for item in tools.memory_list(store, "notes")}
+
+    assert listed == {"committed.md": False, "stray.md": True}
+
+
+def test_sync_status_explains_a_store_that_never_publishes(tmp_path):
+    store = _store(tmp_path)
+    gitio.configure_identity(store.layout.root, "Test", "test@example.com")
+    gitio.set_remote(store.layout.root, str(tmp_path / "remote.git"))
+    store.set_publish(False)
+
+    status = tools.sync_status(store)
+
+    assert status["publishes"] is False
+    assert "publish: false" in status["publish_reason"]
+    # init commits the store's scaffolding, so the branch is never unborn
+    assert status["branch_has_commits"] is True
+    assert "never pushed" in status["_next"]
