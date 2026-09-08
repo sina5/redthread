@@ -382,3 +382,43 @@ def test_store_status_reports_branch_commits_and_uncommitted_content(tmp_path):
     assert status["uncommitted"] == ["memory/a.md"]
     assert status["remote"] is None
     assert status["worktree"] is False
+
+
+@pytest.fixture
+def _no_git_identity(tmp_path, monkeypatch):
+    """A machine that has never configured git — a fresh box, a container,
+    CI. Pointing both config files at paths that don't exist is git's own
+    isolation switch, so nothing here can see the developer's identity."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "absent.gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(tmp_path / "absent.system.gitconfig"))
+    for var in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_commit_succeeds_on_a_machine_with_no_git_identity(tmp_path, _no_git_identity):
+    """Without a fallback, `git commit` fails outright there — leaving a new
+    store's branch unborn and every file in it untracked, which is the silent
+    loss this whole area exists to prevent."""
+    repo = tmp_path / "repo"
+    gitio.init(repo)
+    (repo / "a.txt").write_text("hi", encoding="utf-8")
+
+    assert gitio.commit_if_dirty(repo, "first") is True
+    assert gitio.has_commits(repo)
+    author = _run_git(["log", "-1", "--format=%an <%ae>"], repo)
+    assert author == "Redthread <redthread@localhost>"
+
+
+def test_a_configured_identity_always_wins_over_the_fallback(tmp_path):
+    repo = _fresh_repo(tmp_path / "repo")
+    (repo / "a.txt").write_text("hi", encoding="utf-8")
+
+    gitio.commit_if_dirty(repo, "first")
+
+    assert _run_git(["log", "-1", "--format=%an <%ae>"], repo) == "Test <test@example.com>"
+
+
+def _run_git(args, cwd):
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+    ).stdout.strip()

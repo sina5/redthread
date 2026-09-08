@@ -19,6 +19,17 @@ nothing said so.
   pushing is about distribution. Only the second is optional now, and the
   help text says so.
 
+- **A machine with no git identity no longer silently skips store commits.**
+  `git commit` refuses outright where `user.name`/`user.email` were never
+  configured — a fresh machine, a container, CI — which meant a new store's
+  first commit never happened and everything in it stayed untracked, on
+  exactly the machines least likely to notice. Store commits now fall back
+  to a `Redthread <redthread@localhost>` identity, passed per invocation so
+  nothing is written to the user's git config and a real identity always
+  wins. The marker commit into the user's own code repo keeps the previous
+  behaviour and still reports a failure instead of authoring a commit as
+  somebody they never configured.
+
 - **`init` no longer leaves the store's branch unborn.** `redthread init`
   (both modes) now commits the scaffolding it writes, so the branch is a
   real ref from the start. An unborn branch does not appear in

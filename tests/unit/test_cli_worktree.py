@@ -120,3 +120,18 @@ def test_init_worktree_does_not_publish_memory_to_the_host_repos_remote(tmp_path
         ["git", "ls-remote", str(remote)], capture_output=True, text=True, check=True
     ).stdout
     assert "memories" in refs
+
+
+def test_init_commits_even_on_a_machine_with_no_git_identity(tmp_path, monkeypatch):
+    """CI and fresh machines have no `user.email`, which is exactly where an
+    unborn branch would go unnoticed longest."""
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "absent.gitconfig"))
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", str(tmp_path / "absent.system.gitconfig"))
+    store = tmp_path / "store"
+
+    result = runner.invoke(app, ["init", "demo", "--phases", "build", "--store", str(store)])
+
+    assert result.exit_code == 0, result.output
+    assert "committed the store's scaffolding" in result.output
+    assert gitio.has_commits(store)
+    assert not gitio.is_dirty(store)

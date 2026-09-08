@@ -148,6 +148,30 @@ def ensure_repo(path: Path, branch: str = "main") -> bool:
     return True
 
 
+def _identity_args(repo: Path) -> list[str]:
+    """`-c user.*` overrides, and only when git has no identity of its own.
+
+    A machine that has never run `git config user.email` — a fresh box, a
+    container, CI — makes every `git commit` fail outright. For a memory
+    store that means the first commit never happens, so the branch stays
+    unborn and everything in it untracked: precisely the silent data loss
+    this module is meant to prevent, on the machines least likely to notice.
+
+    Passed per invocation, so nothing is written to the user's config (a
+    worktree store shares the host repo's config, where writing an identity
+    would be an unwelcome surprise), and a real identity always wins.
+    """
+    for key in ("user.name", "user.email"):
+        if not _run(["config", "--get", key], cwd=repo, check=False).stdout.strip():
+            return [
+                "-c",
+                f"user.name={constants.FALLBACK_GIT_NAME}",
+                "-c",
+                f"user.email={constants.FALLBACK_GIT_EMAIL}",
+            ]
+    return []
+
+
 def commit_paths(repo: Path, message: str, paths: list[str]) -> bool:
     """Stage and commit only `paths`, leaving the rest of the index and work
     tree untouched. Returns False if none of them exist or none had changes.
@@ -166,6 +190,9 @@ def commit_paths(repo: Path, message: str, paths: list[str]) -> bool:
         == 0
     ):
         return False  # already committed, nothing to do
+    # No fallback identity here, unlike `commit_if_dirty`: this commit lands
+    # in the user's own code repo, and authoring it as somebody they never
+    # configured is worse than reporting that it didn't happen.
     _run(["commit", "-q", "-m", message, "--", *existing], cwd=repo)
     return True
 
@@ -423,7 +450,7 @@ def commit_if_dirty(repo: Path, message: str) -> bool:
     add_all(repo)
     if not is_dirty(repo):
         return False
-    _run(["commit", "-q", "-m", message], cwd=repo)
+    _run([*_identity_args(repo), "commit", "-q", "-m", message], cwd=repo)
     return True
 
 

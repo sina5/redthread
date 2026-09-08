@@ -33,6 +33,15 @@ Without `merge=union` two nodes appending entries in the same second produce
 a conflict in a file that has no semantic conflict at all.
 """
 
+FALLBACK_GIT_NAME = "Redthread"
+FALLBACK_GIT_EMAIL = "redthread@localhost"
+"""Identity used for a store commit when the machine has none configured.
+
+Only as a last resort, and only for that one invocation: a commit that fails
+for want of an identity leaves the store's branch unborn and its contents
+untracked, which is a far worse outcome than an author line nobody chose.
+"""
+
 INIT_COMMIT_MESSAGE = "redthread: initialize store"
 """First commit on a new store's branch.
 
