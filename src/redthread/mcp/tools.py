@@ -291,30 +291,42 @@ _PUSH_NEXT = {
     "Its outcome is reported by the next redthread call on this store (or sync_status), "
     "and an unpushed commit is republished by any later sync, so nothing is ever lost.",
     "pushed": "Memory is written and pushed — other machines get it on their next sync.",
-    "committed": "Memory is written and committed locally, but the store has no remote, "
-    "so it hasn't left this machine yet.",
+    "committed": "Memory is written and committed locally — durable here, but it has "
+    "not left this machine; the detail below says why.",
     "no_changes": "Memory is written; git reported nothing new to push (the content was "
     "already committed, most likely by the auto-commit daemon).",
     "failed": "Memory is written to disk but the push failed — it is safe locally and "
     "nothing was lost, but it will not reach other machines until this is resolved. "
     "Fix the cause below and re-run `redthread sync --store <store>`.",
-    "skipped": "Memory is written but not pushed (push=False); `redthread sync` "
-    "publishes it to other machines when you're ready.",
+    "skipped": "Memory is written but neither committed nor pushed; nothing is durable "
+    "yet — `redthread sync --store <store>` commits and publishes it.",
 }
 
 
-def _sync_in_background(store: LocalStore, message: str) -> dict[str, Any]:
-    """Commit now (fast, local, makes the write durable), push later.
+def _commit_and_maybe_push(store: LocalStore, message: str, push: bool) -> dict[str, Any]:
+    """Commit now (fast, local, makes the write durable), push if allowed.
 
-    The synchronous version of this — pull --rebase, then push, inside the
-    tool call — made every memory write wait on two network round trips for
-    something that doesn't affect whether the write succeeded. The commit
-    stays synchronous so a durability failure is reported immediately; only
-    the network half moves to the background worker. A store without a
-    remote skips the worker entirely: `sync_report` is local-only there and
-    its `committed` detail explains how to add one.
+    The commit is unconditional: it is what makes the write survive, it has
+    no consequences off this machine, and a caller declining to publish is
+    never asking to lose data. Only the network half is optional, and only
+    it can be refused by the store's `PublishPolicy` — a worktree store
+    shares its host repo's remote, which is not somewhere memory should go
+    without being asked.
+
+    The synchronous version of the push — pull --rebase, then push, inside
+    the tool call — made every memory write wait on two network round trips
+    for something that doesn't affect whether the write succeeded, so it
+    moved to a background worker. A store without a remote skips the worker
+    entirely: `sync_report` is local-only there and its `committed` detail
+    explains how to add one.
     """
     root = store.layout.root
+    policy = store.publish_policy()
+    if not push or not policy.allowed:
+        report = gitio.commit_report(root, message)
+        if report["status"] != "failed":
+            report["detail"] = f"not pushed: {policy.reason}" if push else "not pushed (push=False)"
+        return report
     if not gitio.has_remote(root):
         return gitio.sync_report(root, message)
     try:
@@ -344,16 +356,28 @@ def sync_status(store: LocalStore) -> dict[str, Any]:
     been published yet."""
     root = store.layout.root
     syncer = shared_syncer()
+    policy = store.publish_policy()
     status: dict[str, Any] = {
         "project_id": store.manifest.project_id,
         "has_remote": gitio.has_remote(root),
+        "remote": policy.remote_url,
+        "publishes": policy.allowed,
+        "publish_reason": policy.reason,
+        "branch_has_commits": gitio.has_commits(root),
         "in_flight": syncer.in_flight(root),
         "last_push": syncer.last_report(root),
         "unpushed_commits": gitio.ahead_count(root),
         "dirty": gitio.is_dirty(root),
+        "uncommitted_memory": sorted(store.uncommitted_memory_keys()),
     }
     if status["in_flight"]:
         status["_next"] = "A background push is running — call again to see how it ended."
+    elif not policy.allowed:
+        status["_next"] = (
+            f"Memory is committed locally but never pushed: {policy.reason}. That is a "
+            "deliberate setting, not a failure — say so if the user expects memory on "
+            "other machines."
+        )
     elif not status["has_remote"]:
         status["_next"] = (
             "No remote on the store repo, so memory can't leave this machine — add one "
@@ -378,14 +402,17 @@ def memory_write(
     tags: list[str] | None = None,
     push: bool = True,
 ) -> dict[str, Any]:
-    """Write a memory entry and, by default, commit it and start a push.
+    """Write a memory entry, commit it, and by default start a push.
 
     Pushing is the default because an unpushed memory is invisible to the
     next machine, which is the whole point of the store — and an agent that
     has to remember a second call will sometimes not make it. The push runs
     in the background (`status: pushing`) so the caller never waits on the
-    network; a push failure is surfaced by the next call on this store, and
-    the entry itself is already committed either way.
+    network; a push failure is surfaced by the next call on this store.
+
+    `push=False` declines only the publish step: the entry is committed
+    either way, because an uncommitted entry is not memory, it is a file
+    waiting to be lost.
     """
     store.memory_write(namespace, key, content, description=description, tags=tags)
     # Naming the project written to costs nothing and is the last chance to
@@ -397,10 +424,7 @@ def memory_write(
         "description": description,
         "project_id": store.manifest.project_id,
     }
-    if push:
-        sync = _sync_in_background(store, f"redthread: memory {namespace}/{key}")
-    else:
-        sync = {"status": "skipped"}
+    sync = _commit_and_maybe_push(store, f"redthread: memory {namespace}/{key}", push)
     result["sync"] = sync
     result["_next"] = _push_next_text(sync)
     return result
@@ -491,12 +515,9 @@ def memory_import(
         result["_next"] = _IMPORT_NEXT_NO_FILES if not paths else _IMPORT_NEXT_ALL_SKIPPED
         return result
 
-    if push:
-        sync = _sync_in_background(
-            store, f"redthread: import {len(imported)} entries into {namespace}"
-        )
-    else:
-        sync = {"status": "skipped"}
+    sync = _commit_and_maybe_push(
+        store, f"redthread: import {len(imported)} entries into {namespace}", push
+    )
     result["sync"] = sync
     result["_next"] = _push_next_text(sync)
     return result
@@ -507,7 +528,18 @@ def memory_read(store: LocalStore, namespace: str, key: str) -> str | None:
 
 
 def memory_list(store: LocalStore, namespace: str | None = None) -> list[dict[str, Any]]:
-    return store.memory_index(namespace)
+    """The memory index, each entry flagged `uncommitted` when it exists
+    only as a working-tree file.
+
+    Listing is how a caller checks that a write worked, so it has to be able
+    to tell "written" from "written and durable" — otherwise it keeps
+    confirming a write that git would happily throw away.
+    """
+    uncommitted = store.uncommitted_memory_keys()
+    return [
+        {**item, "uncommitted": f"{item['namespace']}/{item['key']}" in uncommitted}
+        for item in store.memory_index(namespace)
+    ]
 
 
 def memory_search(

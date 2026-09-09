@@ -11,6 +11,13 @@ class ProjectManifest(BaseModel):
     name: str | None = None
     phases: list[str]  # ordered pipeline, e.g. [train, eval, present] or [build, test, present]
     created_ts: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    publish: bool | None = None
+    """Whether memory may be pushed to the store's git remote.
+
+    None means "not decided", which every store with its own remote reads as
+    yes; a worktree store, whose remote belongs to the host repo rather than
+    to memory, reads it as no. See `redthread.store.publish.PublishPolicy`.
+    """
 
     @field_validator("phases")
     @classmethod

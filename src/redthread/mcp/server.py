@@ -267,7 +267,10 @@ def build_server(
         reported by the next call on this store, and `sync_status` can
         confirm the push landed when that matters. A failed push never
         loses the entry. Pass push=False only to batch several writes and
-        sync once at the end."""
+        sync once at the end; the entry is still committed, so nothing is
+        at risk either way. A `committed` status means this store does not
+        publish (its `detail` says why) — memory is durable here but will
+        not reach other machines."""
         return tools.memory_write(
             _store(workspace),
             namespace,
@@ -297,7 +300,9 @@ def build_server(
         """Index of long-term memory: every key with a one-line description,
         so you can tell what's worth reading without opening each entry.
         Spans every namespace unless you name one. Call this at session start
-        before making changes, then memory_read whatever looks relevant."""
+        before making changes, then memory_read whatever looks relevant.
+        An entry flagged `uncommitted: true` exists only as a working-tree
+        file — it is not durable yet; `sync_status` says why."""
         return tools.memory_list(_store(), namespace)
 
     @mcp.tool()

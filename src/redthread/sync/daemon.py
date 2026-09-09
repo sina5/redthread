@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from redthread import constants
-from redthread.store import gitio
+from redthread.store import LocalStore, StoreError, gitio
 
 
 def run_daemon(
@@ -23,7 +23,25 @@ def run_daemon(
     store_root = Path(store_root)
     iterations = 0
     while max_iterations is None or iterations < max_iterations:
-        gitio.sync(store_root, message)
+        # The commit always happens; the push is the store's own decision,
+        # re-read each cycle so enabling publishing takes effect without a
+        # restart. A store that can't be opened still gets committed — a
+        # malformed manifest is no reason to let content go untracked.
+        if _publishes(store_root):
+            gitio.sync(store_root, message)
+        else:
+            gitio.commit_report(store_root, message)
         iterations += 1
         if max_iterations is None or iterations < max_iterations:
             time.sleep(interval)
+
+
+def _publishes(store_root: Path) -> bool:
+    """Whether this store's own manifest allows pushing (see
+    `redthread.store.publish.PublishPolicy`); True if the store can't be
+    opened, which leaves the previous behaviour for anything that isn't a
+    readable store."""
+    try:
+        return LocalStore(store_root).publish_policy().allowed
+    except (StoreError, OSError):
+        return True

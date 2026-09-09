@@ -148,6 +148,30 @@ def ensure_repo(path: Path, branch: str = "main") -> bool:
     return True
 
 
+def _identity_args(repo: Path) -> list[str]:
+    """`-c user.*` overrides, and only when git has no identity of its own.
+
+    A machine that has never run `git config user.email` — a fresh box, a
+    container, CI — makes every `git commit` fail outright. For a memory
+    store that means the first commit never happens, so the branch stays
+    unborn and everything in it untracked: precisely the silent data loss
+    this module is meant to prevent, on the machines least likely to notice.
+
+    Passed per invocation, so nothing is written to the user's config (a
+    worktree store shares the host repo's config, where writing an identity
+    would be an unwelcome surprise), and a real identity always wins.
+    """
+    for key in ("user.name", "user.email"):
+        if not _run(["config", "--get", key], cwd=repo, check=False).stdout.strip():
+            return [
+                "-c",
+                f"user.name={constants.FALLBACK_GIT_NAME}",
+                "-c",
+                f"user.email={constants.FALLBACK_GIT_EMAIL}",
+            ]
+    return []
+
+
 def commit_paths(repo: Path, message: str, paths: list[str]) -> bool:
     """Stage and commit only `paths`, leaving the rest of the index and work
     tree untouched. Returns False if none of them exist or none had changes.
@@ -166,6 +190,9 @@ def commit_paths(repo: Path, message: str, paths: list[str]) -> bool:
         == 0
     ):
         return False  # already committed, nothing to do
+    # No fallback identity here, unlike `commit_if_dirty`: this commit lands
+    # in the user's own code repo, and authoring it as somebody they never
+    # configured is worse than reporting that it didn't happen.
     _run(["commit", "-q", "-m", message, "--", *existing], cwd=repo)
     return True
 
@@ -381,6 +408,24 @@ def has_remote(repo: Path, name: str = "origin") -> bool:
     return name in _run(["remote"], cwd=repo).stdout.split()
 
 
+def is_worktree(repo: Path) -> bool:
+    """True when `repo` is a linked worktree of another repository.
+
+    A linked worktree has a `.git` *file* pointing at the host repo's
+    gitdir, never a directory. It matters because a worktree shares the host
+    repo's remotes: an `origin` here is the project's own origin, not a
+    remote anybody chose for memory.
+    """
+    return (Path(repo) / ".git").is_file()
+
+
+def has_commits(repo: Path) -> bool:
+    """False on an unborn branch — one that exists only as a HEAD pointer
+    with no commit behind it, and therefore no ref, no `git log`, and
+    nothing that a `git clean` would spare."""
+    return _run(["rev-parse", "--verify", "-q", "HEAD"], cwd=repo, check=False).returncode == 0
+
+
 def get_remote_url(repo: Path, name: str = "origin") -> str | None:
     result = _run(["remote", "get-url", name], cwd=repo, check=False)
     return result.stdout.strip() if result.returncode == 0 else None
@@ -405,8 +450,46 @@ def commit_if_dirty(repo: Path, message: str) -> bool:
     add_all(repo)
     if not is_dirty(repo):
         return False
-    _run(["commit", "-q", "-m", message], cwd=repo)
+    _run([*_identity_args(repo), "commit", "-q", "-m", message], cwd=repo)
     return True
+
+
+def uncommitted_paths(repo: Path) -> set[str]:
+    """Repo-relative POSIX paths whose content is not committed — untracked
+    or modified. Used to tell "written" apart from "written and durable"
+    when listing memory; an untracked file is one `git clean` from gone.
+
+    `--untracked-files=all` matters: the default collapses an untracked
+    directory to `memory/`, which says nothing about which entries are at
+    risk.
+    """
+    result = _run(["status", "--porcelain", "--untracked-files=all"], cwd=repo, check=False)
+    if result.returncode != 0:
+        return set()
+    paths: set[str] = set()
+    for line in result.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:].strip()
+        if " -> " in path:  # rename: the destination is what exists now
+            path = path.split(" -> ", 1)[1]
+        paths.add(path.strip('"'))
+    return paths
+
+
+def commit_report(repo: Path, message: str) -> dict[str, str]:
+    """Commit whatever is dirty, touching no network, as a status a caller
+    can report instead of an exception.
+
+    The local half of `sync_report`, for callers that deliberately do not
+    publish. Committing is about durability and pushing is about
+    distribution: declining the second is never a reason to skip the first.
+    """
+    try:
+        changed = commit_if_dirty(Path(repo), message)
+    except (GitError, OSError) as e:
+        return {"status": "failed", "detail": str(e)}
+    return {"status": "committed" if changed else "no_changes"}
 
 
 def ahead_count(repo: Path, remote: str = "origin") -> int | None:
@@ -417,9 +500,7 @@ def ahead_count(repo: Path, remote: str = "origin") -> int | None:
     branch = current_branch(repo)
     if not branch or not has_remote(repo, remote):
         return None
-    result = _run(
-        ["rev-list", "--count", f"{remote}/{branch}..HEAD"], cwd=repo, check=False
-    )
+    result = _run(["rev-list", "--count", f"{remote}/{branch}..HEAD"], cwd=repo, check=False)
     if result.returncode != 0:
         return None
     return int(result.stdout.strip())
@@ -459,7 +540,31 @@ def sync_report(repo: Path, message: str, remote: str = "origin") -> dict[str, s
             "machine — add one with `git -C <store> remote add origin <url>` to make "
             "memory portable",
         }
-    return {"status": "pushed" if changed else "no_changes"}
+    # Naming the remote is the only way a caller can see *where* memory went,
+    # which matters most when the store never chose that remote itself (a
+    # worktree store inherits the host repo's).
+    report = {"status": "pushed" if changed else "no_changes"}
+    url = get_remote_url(repo, remote)
+    if url:
+        report["remote"] = url
+    return report
+
+
+def store_status(repo: Path) -> dict[str, object]:
+    """Everything needed to answer "is this store's content actually safe?":
+    the branch, whether it has any commits at all, what is uncommitted, and
+    how far ahead of the remote it is."""
+    repo = Path(repo)
+    return {
+        "path": str(repo.resolve()),
+        "branch": current_branch(repo),
+        "worktree": is_worktree(repo),
+        "has_commits": has_commits(repo),
+        "dirty": is_dirty(repo),
+        "uncommitted": sorted(uncommitted_paths(repo)),
+        "remote": get_remote_url(repo) if has_remote(repo) else None,
+        "unpushed_commits": ahead_count(repo),
+    }
 
 
 def sync(

@@ -3,5 +3,6 @@
 from redthread.store.errors import StoreError
 from redthread.store.layout import StoreLayout
 from redthread.store.local import LocalStore
+from redthread.store.publish import PublishPolicy
 
-__all__ = ["LocalStore", "StoreError", "StoreLayout"]
+__all__ = ["LocalStore", "PublishPolicy", "StoreError", "StoreLayout"]

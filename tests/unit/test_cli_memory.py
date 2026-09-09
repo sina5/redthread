@@ -106,4 +106,46 @@ def test_memory_write_pushes_by_default_and_no_push_opts_out(tmp_path):
         app, ["memory", "write", "sessions", "note.md", str(note), "--no-push", "--store", store]
     )
     assert result.exit_code == 0, result.output
-    assert gitio.is_dirty(Path(store))
+    # --no-push declines the network step only: the entry is still committed,
+    # because nobody passing --no-push is asking to lose their data.
+    assert "committed" in result.output
+    assert "push skipped" in result.output
+    assert not gitio.is_dirty(Path(store))
+
+
+def test_memory_list_marks_entries_that_are_not_committed(tmp_path):
+    """`memory list` is what an agent reaches for to confirm a write worked,
+    so it has to tell "saved" apart from "saved and durable"."""
+    store = tmp_path / "store"
+    runner.invoke(app, ["init", "demo", "--phases", "build", "--store", str(store)])
+    gitio.configure_identity(store, "Test", "test@example.com")
+    (store / "memory" / "notes").mkdir(parents=True, exist_ok=True)
+    (store / "memory" / "notes" / "stray.md").write_text("untracked\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["memory", "list", "--store", str(store)])
+
+    assert result.exit_code == 0, result.output
+    assert "* notes/stray.md" in result.output
+    assert "uncommitted" in result.output
+
+    runner.invoke(app, ["sync", "--store", str(store)])
+    result = runner.invoke(app, ["memory", "list", "--store", str(store)])
+    assert "* notes/stray.md" not in result.output
+    assert "notes/stray.md" in result.output
+
+
+def test_status_reports_durability_of_the_store(tmp_path):
+    store = tmp_path / "store"
+    runner.invoke(app, ["init", "demo", "--phases", "build", "--store", str(store)])
+    gitio.configure_identity(store, "Test", "test@example.com")
+
+    result = runner.invoke(app, ["status", "--store", str(store)])
+
+    assert result.exit_code == 0, result.output
+    assert "publishes" in result.output
+    assert "remote\t(none)" in result.output
+
+    (store / "memory" / "notes").mkdir(parents=True, exist_ok=True)
+    (store / "memory" / "notes" / "stray.md").write_text("untracked\n", encoding="utf-8")
+    result = runner.invoke(app, ["status", "--store", str(store)])
+    assert "notes/stray.md" in result.output

@@ -107,12 +107,25 @@ def init(
             "repo's current branch, so a future clone can find the store"
         ),
     ] = True,
+    publish: Annotated[
+        bool | None,
+        typer.Option(
+            "--publish/--no-publish",
+            help="Whether memory may be pushed to the store's remote. Omit to decide by "
+            "mode: a store with its own repo publishes, a --worktree-repo store (which "
+            "shares the host repo's remote) does not until `redthread publish --enable`",
+        ),
+    ] = None,
 ) -> None:
     """Create a new Redthread store with a declared phase pipeline.
 
     With --worktree-repo, the host repo is `git init`-ed if it isn't a repo
     yet — so a project you started a minute ago can host memory without any
     git setup of its own.
+
+    The store's scaffolding is committed as it is created, so its branch is
+    a real ref from the start rather than an unborn one whose contents are
+    untracked.
     """
     phase_list = [p.strip() for p in phases.split(",") if p.strip()]
     try:
@@ -125,6 +138,7 @@ def init(
                 phases=phase_list,
                 name=name,
                 publish_marker=commit_marker,
+                publish=publish,
             )
         else:
             created = LocalStore.init(
@@ -134,12 +148,33 @@ def init(
                 name=name,
                 host_repo=host_repo,
                 publish_marker=commit_marker,
+                publish=publish,
             )
     except StoreError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
     typer.echo(f"initialized store at {store} (phases: {', '.join(phase_list)})")
+    _report_init_commit(created.init_commit)
     _report_marker(created.marker_status)
+    policy = created.publish_policy()
+    typer.echo(f"publishes: {'yes' if policy.allowed else 'no'} — {policy.reason}")
+
+
+def _report_init_commit(status: dict[str, str] | None) -> None:
+    """Say whether the store's first commit landed. A failure here (usually
+    no git identity on this machine) leaves the branch unborn and everything
+    untracked, which is exactly the state that is hard to diagnose later."""
+    if status is None:
+        return
+    if status["status"] == "failed":
+        typer.secho(
+            f"the store's initial commit failed: {status.get('detail')}\nthe store works, "
+            "but nothing in it is tracked yet — fix the cause and run `redthread sync`",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+    else:
+        typer.echo("committed the store's scaffolding")
 
 
 def _report_marker(status: dict[str, object] | None) -> None:
@@ -400,10 +435,15 @@ def memory_write(
         typer.Option(help="One-line summary, stored as frontmatter and shown by `memory list`"),
     ] = None,
     tags: Annotated[str, typer.Option(help="Comma-separated tags")] = "",
-    push: Annotated[bool, typer.Option(help="Commit and push the store after writing")] = True,
+    push: Annotated[
+        bool,
+        typer.Option(
+            help="Publish to the store's remote after writing (a local commit happens either way)"
+        ),
+    ] = True,
     store: StoreOpt = Path("./redthread-store"),
 ) -> None:
-    """Write a memory entry and, unless --no-push, publish it to the store's remote."""
+    """Write a memory entry, commit it, and unless --no-push publish it."""
     s = _open(store)
     tag_list = [t.strip() for t in tags.split(",") if t.strip()]
     try:
@@ -416,18 +456,37 @@ def memory_write(
         )
     except (StoreError, ValueError) as e:
         _fail(e)
-    if not push:
-        return
     # The entry is already on disk, so a git failure is a reportable warning,
     # not a reason to exit nonzero as if the write itself had failed.
-    report = gitio.sync_report(Path(store), f"redthread: memory {namespace}/{key}")
-    detail = report.get("detail")
-    if report["status"] == "failed":
-        typer.secho(f"written, but push failed: {detail}", fg=typer.colors.YELLOW, err=True)
-    elif report["status"] == "pushed":
-        typer.echo("written and pushed")
+    _report_write(s, f"redthread: memory {namespace}/{key}", push)
+
+
+def _report_write(store: LocalStore, message: str, push: bool) -> None:
+    """Commit the store, push if asked and allowed, and say what happened.
+
+    Silence is what let an unpushed — worse, uncommitted — write survive a
+    whole session unnoticed: "written, committed, pushed" and "written and
+    nothing else" looked identical from the terminal. One line, every time.
+    """
+    root = store.layout.root
+    policy = store.publish_policy()
+    if not push or not policy.allowed:
+        report = gitio.commit_report(root, message)
+        why = "push skipped" if not push else f"not published: {policy.reason}"
     else:
-        typer.echo(f"written ({report['status']}{f': {detail}' if detail else ''})")
+        report = gitio.sync_report(root, message)
+        # Where it went, not just that it went: a store can inherit a remote
+        # nobody picked for memory (see PublishPolicy).
+        why = report.get("detail") or (
+            f"remote: {report['remote']}" if report.get("remote") else ""
+        )
+    if report["status"] == "failed":
+        typer.secho(
+            f"written, but git failed: {report.get('detail')}", fg=typer.colors.YELLOW, err=True
+        )
+        return
+    suffix = f" — {why}" if why else ""
+    typer.echo(f"written ({report['status']}){suffix}")
 
 
 @memory_app.command("import")
@@ -437,7 +496,12 @@ def memory_import(
     recursive: Annotated[bool, typer.Option(help="Descend into subdirectories")] = True,
     overwrite: Annotated[bool, typer.Option(help="Replace existing keys that differ")] = False,
     tags: Annotated[str, typer.Option(help="Comma-separated tags for every imported entry")] = "",
-    push: Annotated[bool, typer.Option(help="Commit and push the store after importing")] = True,
+    push: Annotated[
+        bool,
+        typer.Option(
+            help="Publish to the store's remote after importing (a local commit happens either way)"
+        ),
+    ] = True,
     store: StoreOpt = Path("./redthread-store"),
 ) -> None:
     """Port existing memory files into this store, one entry per file.
@@ -468,10 +532,12 @@ def memory_import(
     typer.echo(
         f"{counts['imported']} imported, {counts['skipped']} skipped, {counts['failed']} failed"
     )
-    if report["sync"]["status"] == "failed":
-        typer.secho(
-            f"push failed: {report['sync'].get('detail')}", fg=typer.colors.YELLOW, err=True
-        )
+    sync_report = report["sync"]
+    if sync_report["status"] == "failed":
+        typer.secho(f"git failed: {sync_report.get('detail')}", fg=typer.colors.YELLOW, err=True)
+    else:
+        detail = sync_report.get("detail")
+        typer.echo(f"store {sync_report['status']}{f' — {detail}' if detail else ''}")
 
 
 @memory_app.command("read")
@@ -491,14 +557,28 @@ def memory_list(
     namespace: Annotated[str | None, typer.Argument(help="Omit to span every namespace")] = None,
     store: StoreOpt = Path("./redthread-store"),
 ) -> None:
-    """List memory entries with their one-line descriptions."""
+    """List memory entries with their one-line descriptions.
+
+    An entry marked `*` is uncommitted — it exists only as a file in the
+    working tree, so it is not durable and cannot sync anywhere.
+    """
     s = _open(store)
     try:
         index = s.memory_index(namespace)
     except ValueError as e:
         _fail(e)
+    uncommitted = s.uncommitted_memory_keys()
     for item in index:
-        typer.echo(f"{item['namespace']}/{item['key']}\t{item['description'] or ''}")
+        entry = f"{item['namespace']}/{item['key']}"
+        mark = "*" if entry in uncommitted else " "
+        typer.echo(f"{mark} {entry}\t{item['description'] or ''}")
+    if uncommitted:
+        typer.secho(
+            f"* {len(uncommitted)} entr{'y is' if len(uncommitted) == 1 else 'ies are'} "
+            "uncommitted — run `redthread sync --store <store>` to make them durable",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
 
 
 @memory_app.command("search")
@@ -582,12 +662,90 @@ def sync(
     store: StoreOpt = Path("./redthread-store"),
     message: str = "redthread sync",
 ) -> None:
-    """One-shot commit + pull --rebase + push against the store's git remote."""
+    """One-shot commit, then pull --rebase + push if this store publishes."""
+    s = _open(store)
+    policy = s.publish_policy()
     try:
+        if not policy.allowed:
+            report = gitio.commit_report(Path(store), message)
+            typer.echo(f"synced ({report['status']}, not published: {policy.reason})")
+            return
         pushed = gitio.sync(Path(store), message)
     except StoreError as e:
         _fail(e)
-    typer.echo("synced (pushed)" if pushed else "synced (nothing to push)")
+    if pushed and policy.remote_url:
+        typer.echo(f"synced (pushed to {policy.remote_url})")
+    else:
+        typer.echo("synced (pushed)" if pushed else "synced (nothing to push)")
+
+
+@app.command()
+def status(store: StoreOpt = Path("./redthread-store")) -> None:
+    """Whether this store's content is actually safe: branch, commits,
+    uncommitted entries, remote, and whether memory is published."""
+    s = _open(store)
+    git_status = gitio.store_status(Path(store))
+    policy = s.publish_policy()
+    typer.echo(f"store\t{git_status['path']} ({s.manifest.project_id})")
+    worktree = " [worktree]" if git_status["worktree"] else ""
+    typer.echo(f"branch\t{git_status['branch'] or '(none)'}{worktree}")
+    if not git_status["has_commits"]:
+        typer.secho(
+            "commits\tnone — the branch has no ref yet, so everything here is untracked; "
+            "`redthread sync` creates the first commit",
+            fg=typer.colors.YELLOW,
+        )
+    else:
+        typer.echo("commits\tyes")
+    typer.echo(f"remote\t{policy.remote_url or '(none)'}")
+    typer.echo(f"publishes\t{'yes' if policy.allowed else 'no'} — {policy.reason}")
+    ahead = git_status["unpushed_commits"]
+    typer.echo(f"unpushed\t{'unknown' if ahead is None else ahead} commit(s)")
+    uncommitted = s.uncommitted_memory_keys()
+    if uncommitted:
+        typer.secho(
+            f"uncommitted\t{len(uncommitted)} memory entr"
+            f"{'y' if len(uncommitted) == 1 else 'ies'}: {', '.join(sorted(uncommitted))}",
+            fg=typer.colors.YELLOW,
+        )
+    elif git_status["dirty"]:
+        typer.secho("uncommitted\tchanges outside memory/", fg=typer.colors.YELLOW)
+    else:
+        typer.echo("uncommitted\tnothing")
+
+
+@app.command()
+def publish(
+    store: StoreOpt = Path("./redthread-store"),
+    enable: Annotated[
+        bool | None,
+        typer.Option(
+            "--enable/--disable",
+            help="Turn publishing on or off for this store; omit to report the current setting",
+        ),
+    ] = None,
+    default: Annotated[
+        bool, typer.Option(help="Clear the setting and fall back to this store's default")
+    ] = False,
+) -> None:
+    """Show or set whether memory in this store may be pushed to its remote.
+
+    A worktree store shares its host repo's remote, so it does not publish
+    until this says so — memory should not go wherever the project's code
+    goes without someone deciding it should.
+    """
+    s = _open(store)
+    if enable is not None or default:
+        s.set_publish(None if default else enable)
+        report = gitio.commit_report(Path(store), "redthread: publish setting")
+        if report["status"] == "failed":
+            typer.secho(
+                f"setting saved, but committing it failed: {report.get('detail')}",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+    policy = s.publish_policy()
+    typer.echo(f"publishes: {'yes' if policy.allowed else 'no'} — {policy.reason}")
 
 
 daemon_app = typer.Typer(no_args_is_help=True, help="Run the auto-commit sync daemon")
