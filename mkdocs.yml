@@ -15,6 +15,9 @@ exclude_docs: |
 extra_css:
   - stylesheets/extra.css
 
+extra_javascript:
+  - javascripts/terminal.js
+
 extra:
   # Analytics is consent-gated, same as sinafathi.com — the tag only loads
   # once the visitor accepts. No ads cookie here; these docs carry no ads.

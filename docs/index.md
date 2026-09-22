@@ -16,6 +16,50 @@ laptop, a dev server, and any machine that clones the store. The same store
 also carries multi-phase pipeline context — build → test, train → eval —
 with a curated handoff between phases.
 
+<div class="rt-term-window">
+<div class="rt-term-bar"><span class="rt-term-dot"></span><span class="rt-term-dot"></span><span class="rt-term-dot"></span><span class="rt-term-title">redthread — one project, two machines</span><button class="rt-term-toggle" id="rt-term-toggle" type="button" hidden aria-pressed="false" aria-label="Pause the terminal demo"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg><span>Pause</span></button></div>
+<pre class="rt-term" tabindex="0" role="region" aria-label="Terminal transcript: setting up a Redthread store, writing memory, and picking the same memory up on a second machine"><span class="rt-term-note"># One-time setup. The store is an orphan branch of this repo — no second remote to provision.</span><span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread init my-project --phases build,test,present --store ./redthread-store --worktree-repo .</span>
+<span class="rt-term-out">initialized store at redthread-store (phases: build, test, present)</span>
+<span class="rt-term-out">committed the store's scaffolding</span>
+<span class="rt-term-out">committed .redthread.yaml to the host repo (and gitignored the store directory)</span>
+<span class="rt-term-out">publishes: yes — the store has no remote, so nothing can leave this machine</span>
+<span class="rt-term-prompt">$</span> <span class="rt-term-cmd">claude mcp add redthread -- redthread mcp-serve --store ./redthread-store</span>
+<span class="rt-term-out">Added stdio MCP server redthread with command: redthread mcp-serve</span>
+<span class="rt-term-out">--store ./redthread-store to local config</span>
+<span class="rt-term-note"># Memory leaves the machine only once you say so.</span><span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread publish --enable</span>
+<span class="rt-term-out">publishes: yes — publishing is enabled for this store</span>
+<span class="rt-term-out">(remote: git@github.com:acme/myproj.git)</span>
+<span class="rt-term-note"># Everything below is what your agent does over MCP — memory_write, memory_search, context_log.</span><span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread memory write notes db-choice notes.md --description "Why we picked Postgres"</span>
+<span class="rt-term-out">written (pushed) — remote: git@github.com:acme/myproj.git</span>
+<span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread memory list</span>
+<span class="rt-term-out">  notes/db-choice	Why we picked Postgres</span>
+<span class="rt-term-out">  sessions/2026-09-22_add-eval-worker	Added the eval worker; 412 tests green</span>
+<span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread memory search postgres</span>
+<span class="rt-term-out">notes/db-choice	Postgres over SQLite: the eval workers need concurrent writers.</span>
+<span class="rt-term-note"># Pipeline context — build → test → present — lives in the same store.</span><span class="rt-term-prompt">$</span> <span class="rt-term-cmd">run_id=$(redthread run start)</span>
+<span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread log $run_id build note '{"msg": "compiled 412 files in 31s"}'</span>
+<span class="rt-term-out">01M34YFZ5K3T10D0CBJYDVW13P</span>
+<span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread handoff publish $run_id build handoff.json</span>
+<span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread sync</span>
+<span class="rt-term-out">synced (pushed to git@github.com:acme/myproj.git)</span>
+<span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread status</span>
+<span class="rt-term-out">store	~/code/myproj/redthread-store (my-project)</span>
+<span class="rt-term-out">branch	redthread-store [worktree]</span>
+<span class="rt-term-out">commits	yes</span>
+<span class="rt-term-out">remote	git@github.com:acme/myproj.git</span>
+<span class="rt-term-out">publishes	yes — publishing is enabled for this store</span>
+<span class="rt-term-out">unpushed	0 commit(s)</span>
+<span class="rt-term-out">uncommitted	nothing</span>
+<span class="rt-term-note rt-term-rule"># A different machine. Nothing on it but a git clone.</span><span class="rt-term-prompt">$</span> <span class="rt-term-cmd">git clone git@github.com:acme/myproj.git &amp;&amp; cd myproj</span>
+<span class="rt-term-out">Cloning into 'myproj'...</span>
+<span class="rt-term-out">done.</span>
+<span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread attach</span>
+<span class="rt-term-out">attached redthread-store (worktree mode)</span>
+<span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread memory list</span>
+<span class="rt-term-out">  notes/db-choice	Why we picked Postgres</span>
+<span class="rt-term-out">  sessions/2026-09-22_add-eval-worker	Added the eval worker; 412 tests green</span></pre>
+</div>
+
 ## Install
 
 ```bash

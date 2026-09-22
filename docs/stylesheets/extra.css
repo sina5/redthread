@@ -5,3 +5,162 @@
   max-height: 22rem;
   overflow-y: auto;
 }
+
+/* ---------------------------------------------------------------------------
+   Front-page terminal demo (docs/index.md + docs/javascripts/terminal.js).
+
+   The transcript is real CLI output, server-rendered into the <pre> so it
+   still reads without JS; terminal.js replays it a line at a time. The panel
+   stays dark in both colour schemes — it's a terminal, not page content.
+
+   Every tone is built from the theme's own --md-hue and the indigo primary,
+   so the panel reads as part of the page: in slate it's a slightly recessed
+   surface against the page background, in the light scheme it echoes the
+   indigo header. Change the theme's palette and this follows.
+   --------------------------------------------------------------------------- */
+.rt-term-window {
+  --rt-term-bg: hsl(var(--md-hue, 225deg), 15%, 12%);
+  --rt-term-border: hsla(var(--md-hue, 225deg), 15%, 90%, 0.14);
+  --rt-term-out: hsla(var(--md-hue, 225deg), 18%, 86%, 0.82);
+  --rt-term-dim: hsla(var(--md-hue, 225deg), 15%, 88%, 0.56);
+  /* Indigo A200: the primary (#4051b5) is too dark to read on the panel. */
+  --rt-term-accent: #8c9eff;
+  margin: 1.8em 0 2.2em;
+  border: 1px solid var(--rt-term-border);
+  border-radius: 0.7rem;
+  overflow: hidden;
+  background: var(--rt-term-bg);
+  box-shadow: 0 1.2rem 2.4rem -1rem rgba(0, 0, 0, 0.45);
+}
+
+.rt-term-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.8rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--rt-term-border);
+}
+
+.rt-term-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: #ed6a5e;
+  opacity: 0.9;
+}
+.rt-term-dot:nth-child(2) { background: #f4bf4f; }
+.rt-term-dot:nth-child(3) { background: #61c554; }
+
+.rt-term-title {
+  margin-left: auto;
+  font-family: var(--md-code-font-family, monospace);
+  font-size: 0.6rem;
+  letter-spacing: 0.03em;
+  color: var(--rt-term-dim);
+}
+
+.rt-term-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 0.2rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--rt-term-out);
+  font-family: var(--md-code-font-family, monospace);
+  font-size: 0.55rem;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.rt-term-toggle:hover,
+.rt-term-toggle:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+.rt-term-toggle svg {
+  width: 0.65rem;
+  height: 0.65rem;
+  flex-shrink: 0;
+  display: block;
+}
+.rt-term-toggle[hidden] { display: none; }
+
+/* Scoped under .md-typeset to out-specify the theme's own pre/code rules. */
+.md-typeset .rt-term {
+  margin: 0;
+  padding: 0.9rem 1.1rem;
+  height: 26em;
+  overflow: auto;
+  border-radius: 0;
+  background: transparent;
+  color: var(--rt-term-out);
+  font-size: 0.66rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 12;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rt-term-border) transparent;
+}
+.md-typeset .rt-term:focus-visible {
+  outline: 2px solid var(--rt-term-accent);
+  outline-offset: -2px;
+}
+
+.md-typeset .rt-term .rt-term-prompt {
+  color: var(--rt-term-accent);
+  user-select: none;
+}
+.md-typeset .rt-term .rt-term-cmd {
+  color: #fff;
+  font-weight: 600;
+}
+.md-typeset .rt-term .rt-term-out { color: var(--rt-term-out); }
+.md-typeset .rt-term .rt-term-note {
+  display: block;
+  margin: 1.1em 0 0.3em;
+  color: var(--rt-term-dim);
+  font-style: italic;
+}
+.md-typeset .rt-term .rt-term-note:first-child { margin-top: 0; }
+.md-typeset .rt-term .rt-term-rule {
+  margin-top: 1.5em;
+  padding-top: 1.1em;
+  border-top: 1px dashed var(--rt-term-border);
+}
+
+.md-typeset .rt-term .rt-term-cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--rt-term-accent);
+  animation: rt-term-blink 1s steps(2, start) infinite;
+}
+
+@keyframes rt-term-blink {
+  to { visibility: hidden; }
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .rt-term {
+    height: 22em;
+    padding: 0.7rem 0.8rem;
+    font-size: 0.58rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .md-typeset .rt-term .rt-term-cursor { animation: none; }
+}
+
+@media print {
+  .md-typeset .rt-term { height: auto; overflow: visible; }
+  .rt-term-toggle { display: none; }
+}
