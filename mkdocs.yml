@@ -18,6 +18,10 @@ extra_css:
 extra_javascript:
   - javascripts/terminal.js
 
+# Cache-bust extra_css/extra_javascript with a content hash (see the hook).
+hooks:
+  - hooks/cache_bust.py
+
 extra:
   # Analytics is consent-gated, same as sinafathi.com — the tag only loads
   # once the visitor accepts. No ads cookie here; these docs carry no ads.
