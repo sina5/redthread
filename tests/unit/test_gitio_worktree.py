@@ -1,5 +1,7 @@
 import subprocess
 
+import pytest
+
 from redthread.store import gitio
 
 
@@ -68,3 +70,43 @@ def test_ensure_worktree_attaches_to_remote_branch_on_fresh_host_clone(tmp_path)
     assert created is False  # attached to the remote branch, not re-orphaned
     assert (wt_b / "f.txt").read_text(encoding="utf-8") == "from a"
     assert gitio.current_branch(host_b) == "main"  # host clone's checkout untouched
+
+
+def test_ensure_worktree_refuses_existing_local_branch_that_shares_code_history(tmp_path):
+    host = _host_repo(tmp_path)
+    subprocess.run(["git", "branch", "dev"], cwd=host, check=True)
+    wt = tmp_path / "store-wt"
+
+    with pytest.raises(gitio.GitError, match="not an orphan"):
+        gitio.ensure_worktree(host, wt, "dev")
+
+    assert not wt.exists()
+    assert gitio.current_branch(host) == "main"
+
+
+def test_ensure_worktree_refuses_the_checked_out_branch(tmp_path):
+    host = _host_repo(tmp_path)
+
+    with pytest.raises(gitio.GitError, match="not an orphan"):
+        gitio.ensure_worktree(host, tmp_path / "store-wt", "main")
+
+
+def test_ensure_worktree_refuses_remote_branch_cut_from_code(tmp_path):
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
+    host_a = _host_repo(tmp_path)
+    subprocess.run(["git", "-C", str(host_a), "remote", "add", "origin", str(remote)], check=True)
+    # A legacy memories branch cut from main instead of created as an orphan.
+    subprocess.run(
+        ["git", "-C", str(host_a), "push", "-q", "origin", "main", "main:memories"], check=True
+    )
+
+    host_b = tmp_path / "host-b"
+    gitio.clone(str(remote), host_b)
+    wt = tmp_path / "store-wt"
+
+    with pytest.raises(gitio.GitError, match="not an orphan"):
+        gitio.ensure_worktree(host_b, wt, "memories")
+
+    assert not wt.exists()
+    assert not gitio.branch_exists(host_b, "memories")

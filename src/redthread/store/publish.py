@@ -9,8 +9,10 @@ The case that forces the distinction is a worktree store. `redthread init
 --worktree-repo` presents the store as separate from the project — its own
 orphan branch, gitignored in the host repo — but a worktree shares the host
 repo's remotes, so an unqualified "push" sends memory wherever the project
-publishes its code, which may be a public repository. That is never a safe
-default, so a worktree store publishes only when the project says so.
+publishes its code. It still publishes by default — memory that never leaves
+the machine it was written on defeats the point of a portable store — but the
+policy always names the remote it inherited, so where memory goes is never a
+surprise, and `redthread publish --disable` keeps a store local.
 """
 
 from dataclasses import dataclass
@@ -19,6 +21,7 @@ from pathlib import Path
 from redthread.store import gitio
 
 ENABLE_HINT = "`redthread publish --enable --store <store>` turns publishing on"
+DISABLE_HINT = "`redthread publish --disable --store <store>` keeps memory local"
 
 
 @dataclass(frozen=True)
@@ -68,12 +71,11 @@ class PublishPolicy:
             )
         if inherited:
             return cls(
-                allowed=False,
+                allowed=True,
                 remote_url=url,
-                reason=f"this store is a worktree of its host repo and shares that repo's "
-                f"remote ({url}), so pushing would publish memory wherever this project "
-                f"publishes its code — memory stays committed locally until you say "
-                f"otherwise; {ENABLE_HINT}",
+                reason=f"this store is a worktree of its host repo and pushes to that repo's "
+                f"remote ({url}), so memory goes wherever this project publishes its code; "
+                f"{DISABLE_HINT}",
                 inherited_remote=True,
             )
         return cls(

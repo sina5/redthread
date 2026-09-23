@@ -8,6 +8,7 @@ another node pushed in the meantime.
 """
 
 import contextlib
+import json
 import os
 import queue
 import shutil
@@ -25,6 +26,19 @@ from redthread.store.errors import StoreError
 
 class GitError(StoreError):
     pass
+
+
+class GitTimeout(GitError):
+    """A git invocation ran past its timeout and was killed."""
+
+
+class PushBudgetExceeded(GitError):
+    """A sync ran out of its total time budget before the push landed.
+
+    Not a failure of the write: the commit already happened, so the memory
+    is durable here and the next sync publishes it. It exists so a slow
+    remote costs the caller a bounded wait instead of minutes of retries.
+    """
 
 
 # Re-exported so call sites read naturally; defined in `constants`.
@@ -90,7 +104,7 @@ def _run(
     args: list[str],
     cwd: Path,
     check: bool = True,
-    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess:
     proc = subprocess.Popen(
         ["git", *args],
@@ -111,7 +125,7 @@ def _run(
             proc.communicate(timeout=constants.GIT_REAP_TIMEOUT_SECONDS)
         # Raised whatever `check` says: a timeout leaves no return code to
         # inspect, and no caller wants it silently treated as a plain failure.
-        raise GitError(f"git {' '.join(args)} timed out after {timeout}s in {cwd}") from exc
+        raise GitTimeout(f"git {' '.join(args)} timed out after {timeout:g}s in {cwd}") from exc
     result = subprocess.CompletedProcess(args, proc.returncode, stdout=stdout, stderr=stderr)
     if check and result.returncode != 0:
         raise GitError(f"git {' '.join(args)} failed in {cwd}:\n{result.stderr.strip()}")
@@ -359,30 +373,56 @@ def remote_ref_exists(repo: Path, branch: str, remote: str = "origin") -> bool:
     return result.returncode == 0
 
 
+def _refuse_code_branch(host_repo: Path, ref: str, branch: str) -> None:
+    """Raise if `ref` shares history with the host's checked-out commit.
+
+    A store branch must be an orphan. One that descends from the code — a
+    name collision like `--branch dev`, or a legacy `memories` branch once
+    cut from `main` — would put memory commits on top of the project's code
+    and push them wherever that code goes. An unborn host HEAD has no
+    history to share, so there is nothing to check.
+    """
+    if not has_commits(host_repo):
+        return
+    result = _run(["merge-base", ref, "HEAD"], cwd=host_repo, check=False)
+    if result.returncode == 0:
+        raise GitError(
+            f"branch '{branch}' ({ref}) shares history with this repo's checked-out code "
+            f"(common commit {result.stdout.strip()[:7]}), so it is not an orphan branch and "
+            f"cannot hold a Redthread store. Pick a branch name that doesn't exist yet "
+            f"(e.g. --branch memories) and one is created as an orphan."
+        )
+
+
 def ensure_worktree(
     host_repo: Path, worktree_path: Path, branch: str, remote: str = "origin"
 ) -> bool:
     """Attach a worktree at `worktree_path` checked out to `branch`, without
     ever touching the host repo's currently checked-out branch. Creates
     `branch` as an orphan (no shared history) if it doesn't exist locally or
-    on `remote`; otherwise checks out the existing branch. Returns True if
-    the branch was newly created as an orphan.
+    on `remote`; otherwise checks out the existing branch, after refusing
+    one that shares history with the host's code. Returns True if the
+    branch was newly created as an orphan.
     """
     host_repo = Path(host_repo)
     worktree_path = Path(worktree_path)
-    worktree_path.parent.mkdir(parents=True, exist_ok=True)
 
     if branch_exists(host_repo, branch):
+        _refuse_code_branch(host_repo, branch, branch)
+        worktree_path.parent.mkdir(parents=True, exist_ok=True)
         _run(["worktree", "add", str(worktree_path), branch], cwd=host_repo)
         return False
     if has_remote(host_repo, remote):
         _run(["fetch", "-q", remote, branch], cwd=host_repo, check=False)
     if remote_ref_exists(host_repo, branch, remote):
+        _refuse_code_branch(host_repo, f"{remote}/{branch}", branch)
+        worktree_path.parent.mkdir(parents=True, exist_ok=True)
         _run(
             ["worktree", "add", "-b", branch, str(worktree_path), f"{remote}/{branch}"],
             cwd=host_repo,
         )
         return False
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
     _run(["worktree", "add", "--orphan", "-b", branch, str(worktree_path)], cwd=host_repo)
     return True
 
@@ -506,9 +546,13 @@ def ahead_count(repo: Path, remote: str = "origin") -> int | None:
     return int(result.stdout.strip())
 
 
-def pull_rebase(repo: Path, remote: str = "origin") -> None:
+def pull_rebase(
+    repo: Path, remote: str = "origin", timeout: float = DEFAULT_TIMEOUT_SECONDS
+) -> None:
     branch = current_branch(repo)
-    result = _run(["pull", "--rebase", "-q", remote, branch], cwd=repo, check=False)
+    result = _run(
+        ["pull", "--rebase", "-q", remote, branch], cwd=repo, check=False, timeout=timeout
+    )
     if result.returncode != 0:
         stderr = result.stderr.lower()
         if "couldn't find remote ref" in stderr or "unknown revision" in stderr:
@@ -516,23 +560,80 @@ def pull_rebase(repo: Path, remote: str = "origin") -> None:
         raise GitError(f"git pull --rebase failed in {repo}:\n{result.stderr.strip()}")
 
 
-def push(repo: Path, remote: str = "origin") -> subprocess.CompletedProcess:
+def push(
+    repo: Path, remote: str = "origin", timeout: float = DEFAULT_TIMEOUT_SECONDS
+) -> subprocess.CompletedProcess:
     branch = current_branch(repo)
-    return _run(["push", "-q", "-u", remote, branch], cwd=repo, check=False)
+    return _run(["push", "-q", "-u", remote, branch], cwd=repo, check=False, timeout=timeout)
 
 
-def sync_report(repo: Path, message: str, remote: str = "origin") -> dict[str, str]:
+LAST_PUSH_FILENAME = "redthread-last-push.json"
+
+
+def _last_push_path(repo: Path) -> Path | None:
+    result = _run(["rev-parse", "--absolute-git-dir"], cwd=repo, check=False)
+    if result.returncode != 0:
+        return None
+    return Path(result.stdout.strip()) / LAST_PUSH_FILENAME
+
+
+def record_push_outcome(repo: Path, report: dict[str, object]) -> None:
+    """Remember how the last push of this store ended, on this machine.
+
+    Kept in the git dir rather than the store: it describes this clone's
+    relationship with the remote, not memory, so it must never be committed.
+    Without it a failed push is known only to the process that attempted it,
+    and when that was the last write of a session nobody ever hears about it.
+    """
+    path = _last_push_path(repo)
+    if path is None:
+        return
+    with contextlib.suppress(OSError):
+        path.write_text(json.dumps({**report, "at": time.time()}), encoding="utf-8")
+
+
+def last_push_outcome(repo: Path) -> dict[str, object] | None:
+    """The outcome `record_push_outcome` saved, from any earlier process."""
+    path = _last_push_path(repo)
+    if path is None or not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def sync_report(
+    repo: Path, message: str, remote: str = "origin", budget: float | None = None
+) -> dict[str, str]:
     """`sync`, but as a status a caller can hand back to an agent instead of
     an exception. Used where the write itself already succeeded and a failed
     push must be reported, not raised — losing the write to a git error
     (no identity configured, no network, a remote that rejects) would be a
     much worse outcome than an unpushed one.
+
+    `budget` caps the whole sync in seconds (see `sync`). Running out of it
+    reports `committed`, not `failed`: the write is durable, the network was
+    merely slow, and the next sync publishes it. Every outcome that involved
+    a remote is recorded with `record_push_outcome`, so a later process can
+    see a failure this one had no chance to report.
     """
     repo = Path(repo)
     try:
-        changed = sync(repo, message, remote=remote)
+        changed = sync(repo, message, remote=remote, budget=budget)
+    except PushBudgetExceeded as e:
+        report = {
+            "status": "committed",
+            "detail": f"{e} — the commit is safe on this machine and the next sync publishes it",
+        }
+        record_push_outcome(repo, report)
+        return report
     except (GitError, OSError) as e:
-        return {"status": "failed", "detail": str(e)}
+        report = {"status": "failed", "detail": str(e)}
+        with contextlib.suppress(GitError, OSError):
+            if has_remote(repo, remote):
+                record_push_outcome(repo, report)
+        return report
     if not has_remote(repo, remote):
         return {
             "status": "committed" if changed else "no_changes",
@@ -547,6 +648,7 @@ def sync_report(repo: Path, message: str, remote: str = "origin") -> dict[str, s
     url = get_remote_url(repo, remote)
     if url:
         report["remote"] = url
+    record_push_outcome(repo, report)
     return report
 
 
@@ -572,28 +674,60 @@ def sync(
     message: str,
     remote: str = "origin",
     max_retries: int = constants.SYNC_MAX_RETRIES,
+    budget: float | None = None,
 ) -> bool:
     """Commit local changes if any, then rebase onto and push to `remote`,
     retrying if another node pushed first. Returns True if anything was
-    committed or pushed."""
+    committed or pushed.
+
+    `budget`, in seconds, bounds the network half as a whole — every pull,
+    push, and backoff together — rather than each git call separately; a
+    slow remote otherwise costs up to a minute per call across every retry.
+    The commit comes first and never counts against it. Running out raises
+    `PushBudgetExceeded` with the commit already made. None means no cap
+    beyond each call's own timeout.
+    """
     repo = Path(repo)
     committed = commit_if_dirty(repo, message)
     if not has_remote(repo, remote):
         return committed
 
+    deadline = None if budget is None else time.monotonic() + budget
+
+    def _timeout() -> float:
+        if deadline is None:
+            return DEFAULT_TIMEOUT_SECONDS
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise PushBudgetExceeded(f"push did not finish within {budget:g}s")
+        # Clamp to `budget` too: `(t + budget) - t` can round a hair above
+        # `budget` when the clock hasn't ticked (coarse on Windows).
+        return min(DEFAULT_TIMEOUT_SECONDS, budget, remaining)
+
     for attempt in range(max_retries):
-        pull_rebase(repo, remote)
-        result = push(repo, remote)
+        timeout = _timeout()
+        try:
+            pull_rebase(repo, remote, timeout=timeout)
+            timeout = _timeout()
+            result = push(repo, remote, timeout=timeout)
+        except GitTimeout as e:
+            # A call whose timeout the budget cut short timed out because the
+            # budget ran out. Asking the clock again instead races on Windows,
+            # where a wait can end a tick before the deadline reads as passed.
+            if deadline is not None and timeout < DEFAULT_TIMEOUT_SECONDS:
+                raise PushBudgetExceeded(f"push did not finish within {budget:g}s") from e
+            raise
         if result.returncode == 0:
             return True
         stderr = result.stderr.lower()
         if "rejected" not in stderr and "fetch first" not in stderr:
             raise GitError(f"git push failed in {repo}:\n{result.stderr.strip()}")
-        time.sleep(
-            min(
-                constants.SYNC_RETRY_BACKOFF_SECONDS * (2**attempt),
-                constants.SYNC_RETRY_BACKOFF_CAP_SECONDS,
-            )
+        backoff = min(
+            constants.SYNC_RETRY_BACKOFF_SECONDS * (2**attempt),
+            constants.SYNC_RETRY_BACKOFF_CAP_SECONDS,
         )
+        if deadline is not None:
+            backoff = min(backoff, max(0.0, deadline - time.monotonic()))
+        time.sleep(backoff)
 
     raise GitError(f"git push kept getting rejected after {max_retries} retries in {repo}")

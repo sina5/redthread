@@ -525,13 +525,21 @@ redthread publish --disable --store ./my-store    # commit locally, never push
 redthread publish --default --store ./my-store    # go back to the default for this store
 ```
 
-A store with its own repo publishes by default. A **worktree store does
-not**: it shares the host repo's remotes, so an unqualified push would send
-memory wherever the project publishes its code — which is often a public
-repository nobody chose as a memory destination. Memory is committed
-locally on every write, and `redthread publish --enable` turns publishing
-on once you've decided that remote should hold it. The setting lives in the
-store's `project.yaml`, so it travels with the store.
+Every store publishes by default, because memory that never leaves the
+machine it was written on isn't portable. Know where a **worktree store**
+pushes: it shares the host repo's remotes, so its memory goes wherever the
+project publishes its code. If that is a public repository, or anywhere
+memory shouldn't go, run `redthread publish --disable`. Memory is still
+committed locally on every write. `init --no-publish` sets this from the
+start. The setting lives in the store's `project.yaml`, so it travels with
+the store, and `publish`, `status`, and `init` all name the remote in use.
+
+A push never holds up the write that triggered it. Over MCP, the push runs
+in the background. From the CLI, `memory write` gives the push
+20 seconds, then reports `committed` and leaves the rest to the next sync.
+Every outcome is recorded on the machine. When a push fails or never
+finishes, the next session's `context_bootstrap` reports it and republishes
+the unpushed commits in the background.
 
 ```bash
 redthread memory write notes toolchain.md ./note.md \

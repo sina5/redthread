@@ -1,8 +1,8 @@
 """PublishPolicy: who is allowed to push a store's memory, and why.
 
 The case that matters is a worktree store, which shares the host repo's
-remote — so an unqualified push publishes memory wherever the project
-publishes its code.
+remote — so a push publishes memory wherever the project publishes its
+code. It still publishes by default; the policy has to say where.
 """
 
 import subprocess
@@ -44,18 +44,21 @@ def test_store_with_its_own_remote_publishes_by_default(tmp_path):
     assert policy.inherited_remote is False
 
 
-def test_worktree_store_does_not_publish_to_the_host_repos_remote(tmp_path):
+def test_worktree_store_publishes_by_default_and_names_the_inherited_remote(tmp_path):
     host = _host_repo(tmp_path / "host")
-    gitio.set_remote(host, str(_bare_remote(tmp_path)))
+    remote = _bare_remote(tmp_path)
+    gitio.set_remote(host, str(remote))
     store = LocalStore.init_worktree(
         host, tmp_path / "store-wt", "memories", project_id="demo", phases=["build"]
     )
 
     policy = store.publish_policy()
 
-    assert policy.allowed is False
+    assert policy.allowed is True
     assert policy.inherited_remote is True
-    assert "worktree" in policy.reason
+    # Where memory goes must be visible, since nobody picked this remote for it.
+    assert str(remote) in policy.reason
+    assert "--disable" in policy.reason
 
 
 def test_explicit_publish_setting_overrides_the_worktree_default(tmp_path):
@@ -65,11 +68,11 @@ def test_explicit_publish_setting_overrides_the_worktree_default(tmp_path):
         host, tmp_path / "store-wt", "memories", project_id="demo", phases=["build"]
     )
 
-    store.set_publish(True)
+    store.set_publish(False)
 
-    assert store.publish_policy().allowed is True
+    assert store.publish_policy().allowed is False
     # and it survives a reopen, because it lives in project.yaml
-    assert LocalStore(store.layout.root).publish_policy().allowed is True
+    assert LocalStore(store.layout.root).publish_policy().allowed is False
 
 
 def test_publish_false_stops_a_store_that_would_otherwise_publish(tmp_path):

@@ -74,9 +74,10 @@ def test_init_worktree_leaves_the_orphan_branch_born_and_tracked(tmp_path):
     assert "memories" in branches
 
 
-def test_init_worktree_does_not_publish_memory_to_the_host_repos_remote(tmp_path):
-    """A worktree shares the host repo's remotes, which in the field was a
-    public GitHub repo the user never chose as a memory destination."""
+def test_init_worktree_publishes_to_the_host_repos_remote_unless_disabled(tmp_path):
+    """A worktree shares the host repo's remotes. It publishes there by
+    default (memory stuck on one machine isn't portable), says where, and
+    `publish --disable` keeps it local."""
     host = _host_repo(tmp_path / "host")
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
@@ -105,21 +106,24 @@ def test_init_worktree_does_not_publish_memory_to_the_host_repos_remote(tmp_path
     )
 
     assert result.exit_code == 0, result.output
-    assert "committed" in result.output
-    assert not gitio.is_dirty(store)  # durable locally
-    refs = subprocess.run(
-        ["git", "ls-remote", str(remote)], capture_output=True, text=True, check=True
-    ).stdout
-    assert "memories" not in refs  # but never published
-
-    enabled = runner.invoke(app, ["publish", "--enable", "--store", str(store)])
-    assert enabled.exit_code == 0, enabled.output
-    pushed = runner.invoke(app, ["sync", "--store", str(store)])
-    assert pushed.exit_code == 0, pushed.output
+    assert "pushed" in result.output
+    assert str(remote) in result.output  # says where it went
     refs = subprocess.run(
         ["git", "ls-remote", str(remote)], capture_output=True, text=True, check=True
     ).stdout
     assert "memories" in refs
+
+    disabled = runner.invoke(app, ["publish", "--disable", "--store", str(store)])
+    assert disabled.exit_code == 0, disabled.output
+    before = gitio.ahead_count(store)
+    note.write_text("more topology\n", encoding="utf-8")
+    local = runner.invoke(
+        app, ["memory", "write", "notes", "net2.md", str(note), "--store", str(store)]
+    )
+    assert local.exit_code == 0, local.output
+    assert "committed" in local.output
+    assert not gitio.is_dirty(store)  # durable locally
+    assert gitio.ahead_count(store) == before + 1  # but not published
 
 
 def test_init_commits_even_on_a_machine_with_no_git_identity(tmp_path, monkeypatch):

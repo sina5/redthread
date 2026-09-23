@@ -134,7 +134,16 @@ class BackgroundSyncer:
             with state.lock:
                 state.rerun = False
                 message = state.message
-            report = gitio.sync_report(root, message)
+            # sync_report reports rather than raises, but anything that does
+            # escape must still end in a report: a worker that dies with
+            # `running` set blocks every later push of this store for the
+            # life of the process, and spins `wait()` forever.
+            try:
+                report = gitio.sync_report(
+                    root, message, budget=constants.BACKGROUND_PUSH_BUDGET_SECONDS
+                )
+            except Exception as e:  # noqa: BLE001 — see above
+                report = {"status": "failed", "detail": f"background push crashed: {e!r}"}
             with state.lock:
                 state.last = {**report, "at": time.time()}
                 if not state.rerun:

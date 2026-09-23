@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 
-from redthread import __version__, hostconfig
+from redthread import __version__, constants, hostconfig
 from redthread.mcp import tools as mcp_tools
 from redthread.mcp.server import main as run_mcp_server
 from redthread.models import Handoff
@@ -111,9 +111,9 @@ def init(
         bool | None,
         typer.Option(
             "--publish/--no-publish",
-            help="Whether memory may be pushed to the store's remote. Omit to decide by "
-            "mode: a store with its own repo publishes, a --worktree-repo store (which "
-            "shares the host repo's remote) does not until `redthread publish --enable`",
+            help="Whether memory may be pushed to the store's remote (default: yes). "
+            "A --worktree-repo store pushes to the host repo's own remote, so pass "
+            "--no-publish if memory must not go where the project's code goes",
         ),
     ] = None,
 ) -> None:
@@ -474,7 +474,7 @@ def _report_write(store: LocalStore, message: str, push: bool) -> None:
         report = gitio.commit_report(root, message)
         why = "push skipped" if not push else f"not published: {policy.reason}"
     else:
-        report = gitio.sync_report(root, message)
+        report = gitio.sync_report(root, message, budget=constants.CLI_PUSH_BUDGET_SECONDS)
         # Where it went, not just that it went: a store can inherit a remote
         # nobody picked for memory (see PublishPolicy).
         why = report.get("detail") or (
@@ -730,9 +730,9 @@ def publish(
 ) -> None:
     """Show or set whether memory in this store may be pushed to its remote.
 
-    A worktree store shares its host repo's remote, so it does not publish
-    until this says so — memory should not go wherever the project's code
-    goes without someone deciding it should.
+    Every store publishes by default. A worktree store's remote is its host
+    repo's own, so `--disable` is how to keep memory off wherever the
+    project's code goes.
     """
     s = _open(store)
     if enable is not None or default:

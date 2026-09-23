@@ -62,10 +62,10 @@ def test_commit_during_inflight_push_is_not_left_behind(tmp_path, syncer, monkey
     release_first_push = threading.Event()
     real_sync_report = gitio.sync_report
 
-    def gated_sync_report(root, message, remote="origin"):
+    def gated_sync_report(root, message, remote="origin", budget=None):
         first_push_started.set()
         release_first_push.wait(timeout=30)
-        return real_sync_report(root, message, remote=remote)
+        return real_sync_report(root, message, remote=remote, budget=budget)
 
     monkeypatch.setattr(background_mod.gitio, "sync_report", gated_sync_report)
 
@@ -88,7 +88,7 @@ def test_commit_during_inflight_push_is_not_left_behind(tmp_path, syncer, monkey
 def test_previous_failure_is_surfaced_on_next_schedule(tmp_path, syncer, monkeypatch):
     repo = _repo_with_remote(tmp_path)
 
-    def failing_sync_report(root, message, remote="origin"):
+    def failing_sync_report(root, message, remote="origin", budget=None):
         return {"status": "failed", "detail": "remote unreachable"}
 
     monkeypatch.setattr(background_mod.gitio, "sync_report", failing_sync_report)
@@ -143,3 +143,26 @@ def test_sync_status_reports_published_store(tmp_path):
     assert status["last_push"]["status"] == "pushed"
     assert status["unpushed_commits"] == 0
     assert "Fully published" in status["_next"]
+
+
+def test_a_crashing_push_is_reported_and_does_not_wedge_the_store(tmp_path, syncer, monkeypatch):
+    """An exception escaping the worker used to leave `running` set: `wait()`
+    spun forever and the store never pushed again in that process."""
+    repo = _repo_with_remote(tmp_path)
+
+    def crashing_sync_report(root, message, remote="origin", budget=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(background_mod.gitio, "sync_report", crashing_sync_report)
+    syncer.schedule(repo, "a")
+    report = syncer.wait(repo, timeout=30)
+
+    assert report["status"] == "failed"
+    assert "boom" in report["detail"]
+    assert not syncer.in_flight(repo)
+
+    monkeypatch.undo()
+    (repo / "a.txt").write_text("a", encoding="utf-8")
+    gitio.commit_if_dirty(repo, "a")
+    syncer.schedule(repo, "a")
+    assert syncer.wait(repo, timeout=30)["status"] == "pushed"
