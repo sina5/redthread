@@ -700,7 +700,9 @@ def sync(
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise PushBudgetExceeded(f"push did not finish within {budget:g}s")
-        return min(DEFAULT_TIMEOUT_SECONDS, remaining)
+        # Clamp to `budget` too: `(t + budget) - t` can round a hair above
+        # `budget` when the clock hasn't ticked (coarse on Windows).
+        return min(DEFAULT_TIMEOUT_SECONDS, budget, remaining)
 
     for attempt in range(max_retries):
         try:
