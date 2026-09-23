@@ -2,6 +2,49 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.14] - Unreleased
+
+### Changed
+
+- **Worktree stores publish by default again.** 0.13 stopped them pushing
+  until `redthread publish --enable`, so every existing worktree store
+  quietly stopped syncing when it was upgraded. In the field, one had 10
+  commits that never left the machine. Memory that stays on one machine
+  isn't portable, so pushing is the default for every store once more. What
+  0.13 got right is kept: the policy always names the remote a worktree
+  store inherited, and `redthread publish --disable` (or
+  `init --no-publish`) keeps a store local. Stores that set `publish`
+  explicitly are unaffected.
+
+### Fixed
+
+- **A slow remote can no longer hold up the agent.** A `redthread memory
+  write` from the CLI (the fallback when the MCP server isn't connected)
+  pushed in the foreground with 60 seconds per git call across up to five
+  retries, which could block for minutes. `sync` now takes a total time
+  budget covering every pull, push, and backoff. The CLI write gets
+  20 seconds and the background worker gets 120. Running out reports
+  `committed` rather than `failed`, since the write is durable and only
+  the publish is deferred. MCP shutdown now waits 10 seconds for an
+  in-flight push instead of 30.
+
+- **A failed push is no longer forgotten when the session ends.** A
+  background push's outcome only reached the next write in the same
+  process, so a failure on a session's last write was never reported, and
+  its commits stayed unpushed until someone happened to run `sync`. Every
+  push outcome is now recorded in the store's git directory (per machine,
+  never committed). `context_bootstrap` checks for unpublished commits at
+  the start of every session, reports them with the last push outcome
+  under `sync`, and republishes them in the background. `sync_status`
+  falls back to the recorded outcome too.
+
+- **`init`/`attach`/`resume` refuse a store branch that isn't an orphan.**
+  Attaching to an existing branch that shares history with the host's code
+  (a name collision like `--branch dev`, or a legacy `memories` branch cut
+  from `main`) would have put memory commits on top of the project's code.
+  It now fails with an explanation. Creating a new branch is unchanged: it
+  is always an orphan.
+
 ## [0.13] - 2026-08-31
 
 Durability fixes, from a field report where four memory entries written

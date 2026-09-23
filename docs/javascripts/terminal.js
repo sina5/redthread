@@ -22,11 +22,11 @@
        "Added stdio MCP server redthread with command: redthread mcp-serve",
        "--store ./redthread-store to local config"
      ] },
-    {"note": "Memory leaves the machine only once you say so."},
-    { "cmd": "redthread publish --enable",
+    {"note": "Memory syncs through this repo's own remote. `publish --disable` keeps it local."},
+    { "cmd": "redthread publish",
       "out": [
-       "publishes: yes — publishing is enabled for this store",
-       "(remote: git@github.com:acme/myproj.git)"
+       "publishes: yes — this store is a worktree of its host repo and pushes to",
+       "that repo's remote (git@github.com:acme/myproj.git)"
      ] },
     {"note": "Everything below is what your agent does over MCP — memory_write, memory_search, context_log."},
     { "cmd": "redthread memory write notes db-choice notes.md --description \"Why we picked Postgres\"",

@@ -26,9 +26,9 @@ with a curated handoff between phases.
 <span class="rt-term-prompt">$</span> <span class="rt-term-cmd">claude mcp add redthread -- redthread mcp-serve --store ./redthread-store</span>
 <span class="rt-term-out">Added stdio MCP server redthread with command: redthread mcp-serve</span>
 <span class="rt-term-out">--store ./redthread-store to local config</span>
-<span class="rt-term-note"># Memory leaves the machine only once you say so.</span><span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread publish --enable</span>
-<span class="rt-term-out">publishes: yes — publishing is enabled for this store</span>
-<span class="rt-term-out">(remote: git@github.com:acme/myproj.git)</span>
+<span class="rt-term-note"># Memory syncs through this repo's own remote. `publish --disable` keeps it local.</span><span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread publish</span>
+<span class="rt-term-out">publishes: yes — this store is a worktree of its host repo and pushes to</span>
+<span class="rt-term-out">that repo's remote (git@github.com:acme/myproj.git)</span>
 <span class="rt-term-note"># Everything below is what your agent does over MCP — memory_write, memory_search, context_log.</span><span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread memory write notes db-choice notes.md --description "Why we picked Postgres"</span>
 <span class="rt-term-out">written (pushed) — remote: git@github.com:acme/myproj.git</span>
 <span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread memory list</span>

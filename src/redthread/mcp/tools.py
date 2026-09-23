@@ -109,6 +109,9 @@ def context_bootstrap(
     }
     if binding and binding["status"] != "ok":
         payload["warning"] = _binding_warning(binding, manifest.project_id)
+    stranded = _republish_stranded(store)
+    if stranded is not None:
+        payload["sync"] = stranded
     # Surfaced through the agent, which is the only party here with a way to
     # reach the human. Throttled and failure-silent, so it costs nothing on
     # the sessions where there is nothing to say.
@@ -116,6 +119,44 @@ def context_bootstrap(
     if upgrade:
         payload["update_available"] = upgrade
     return payload
+
+
+def _republish_stranded(store: LocalStore) -> dict[str, Any] | None:
+    """Start publishing commits an earlier session left on this machine.
+
+    A background push outlives nothing: when a session's last write fails to
+    push, or the process exits before the push finishes, the only record is
+    the one `gitio.record_push_outcome` left behind — and before this, only
+    the next *write* in the *same* process ever looked. Bootstrap is the one
+    call every session makes, so it checks here (local git only, no network),
+    reports what it found, and hands any unpublished commits to the
+    background worker. Returns None when there is nothing to say.
+    """
+    root = store.layout.root
+    try:
+        if not gitio.has_remote(root) or not gitio.has_commits(root):
+            return None
+        if not store.publish_policy().allowed:
+            return None
+        previous = gitio.last_push_outcome(root)
+        ahead = gitio.ahead_count(root)
+    except (gitio.GitError, OSError):
+        return None
+    # None means the remote has never seen this branch: everything is unpublished.
+    # A failed push the remote has since caught up with is history, not news.
+    if ahead == 0:
+        return None
+    status = shared_syncer().schedule(root, "redthread: publish commits left by an earlier session")
+    last = f" (last push: {previous.get('detail') or previous.get('status')})" if previous else ""
+    report: dict[str, Any] = {
+        "unpushed_commits": ahead,
+        "previous_push": previous,
+        "republishing": status["status"],
+        "_next": f"An earlier session left memory on this machine that never reached the "
+        f"remote{last}. A background push has started; call `sync_status` later to confirm "
+        "it landed, and tell the user if it fails again.",
+    }
+    return report
 
 
 def _binding_warning(binding: dict[str, object], project_id: str) -> str:
@@ -365,7 +406,7 @@ def sync_status(store: LocalStore) -> dict[str, Any]:
         "publish_reason": policy.reason,
         "branch_has_commits": gitio.has_commits(root),
         "in_flight": syncer.in_flight(root),
-        "last_push": syncer.last_report(root),
+        "last_push": syncer.last_report(root) or gitio.last_push_outcome(root),
         "unpushed_commits": gitio.ahead_count(root),
         "dirty": gitio.is_dirty(root),
         "uncommitted_memory": sorted(store.uncommitted_memory_keys()),

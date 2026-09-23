@@ -105,11 +105,25 @@ SYNC_RETRY_BACKOFF_CAP_SECONDS = 5
 SYNC_DAEMON_INTERVAL_SECONDS = 10.0
 """Poll interval for the auto-commit daemon (architecture target: 5-15s)."""
 
-BACKGROUND_SYNC_DRAIN_SECONDS = 30.0
+BACKGROUND_SYNC_DRAIN_SECONDS = 10.0
 """How long process exit waits for in-flight background pushes. Long enough
-for a healthy push to finish, short enough that a dead network can't hold
-the process hostage — a stranded push costs nothing but latency, since the
-commit is local and the next sync from anywhere publishes it."""
+for a healthy push to finish, short enough that ending a session never waits
+on a slow network — a stranded push costs nothing but latency, since the
+commit is local and the next session's `context_bootstrap` republishes it."""
+
+CLI_PUSH_BUDGET_SECONDS = 20.0
+"""Total time `redthread memory write` may spend pushing, in the foreground.
+
+The CLI is the fallback agents use when the MCP server is not connected, and
+it has no background worker to hand the push to: the process exits when the
+command does. Without a cap, a slow remote cost up to a minute per git call
+across every retry, with the agent blocked behind it. Past this, the write
+reports `committed` and the next sync publishes it."""
+
+BACKGROUND_PUSH_BUDGET_SECONDS = 120.0
+"""Total time one background push may take before giving up until the next
+sync. Nothing waits on it, so it is generous; it only keeps a dead remote from
+tying up the worker through every retry."""
 
 # ----- adapters -------------------------------------------------------------
 
