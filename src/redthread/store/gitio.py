@@ -705,11 +705,16 @@ def sync(
         return min(DEFAULT_TIMEOUT_SECONDS, budget, remaining)
 
     for attempt in range(max_retries):
+        timeout = _timeout()
         try:
-            pull_rebase(repo, remote, timeout=_timeout())
-            result = push(repo, remote, timeout=_timeout())
+            pull_rebase(repo, remote, timeout=timeout)
+            timeout = _timeout()
+            result = push(repo, remote, timeout=timeout)
         except GitTimeout as e:
-            if deadline is not None and time.monotonic() >= deadline:
+            # A call whose timeout the budget cut short timed out because the
+            # budget ran out. Asking the clock again instead races on Windows,
+            # where a wait can end a tick before the deadline reads as passed.
+            if deadline is not None and timeout < DEFAULT_TIMEOUT_SECONDS:
                 raise PushBudgetExceeded(f"push did not finish within {budget:g}s") from e
             raise
         if result.returncode == 0:
