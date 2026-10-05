@@ -1,85 +1,100 @@
 ---
 title: AGENTS.md example — set up Redthread as your project's agent memory
-description: A copy-paste AGENTS.md (or CLAUDE.md) file that installs Redthread via uv or pip, registers its MCP server, and tells your coding agent how to use it as memory for this project.
+description: An AGENTS.md (or CLAUDE.md) file that you can copy. It installs Redthread with uv or pip, registers its MCP server, and tells your coding agent how to use Redthread as the memory for the project.
 ---
 
 # AGENTS.md example
 
-`AGENTS.md` (also read as `CLAUDE.md` by Claude Code) is the file most
-coding agents check first for project-specific instructions. MCP
-registration alone only gives an agent the *capability* to use Redthread —
-nothing tells it to actually reach for those tools. Putting a section like
-this in `AGENTS.md` gives it the *habit*: a policy on when to read and
-write memory, a CLI fallback for when the MCP server isn't connected, and
-install steps so a fresh clone can bootstrap itself.
+Most coding agents read `AGENTS.md` first to get project instructions.
+Claude Code reads `CLAUDE.md` for the same purpose.
 
-Already have the MCP server registered? Skip the manual paste below and
-just ask the agent to call the `agents_md_bootstrap` tool — it writes the
-same policy section into this project's `AGENTS.md`/`CLAUDE.md` itself,
-and it's idempotent, so it's safe to have the agent call it every session.
-The full example below is for bootstrapping a project that doesn't have
-Redthread set up at all yet.
+When you register the MCP server, the agent gets only the *capability* to
+use Redthread. Nothing tells the agent to use these tools. A section like
+the example below in `AGENTS.md` gives the agent the *habit*. The section
+contains:
+
+- A policy that tells the agent when to read and write memory.
+- A CLI alternative for when the MCP server is not connected.
+- Install steps, so that a new clone can do its own setup.
+
+Is the MCP server already registered? Then you do not have to paste the
+text manually. Tell the agent to call the `agents_md_bootstrap` tool. This
+tool writes the same policy into the `AGENTS.md`/`CLAUDE.md` file of the
+project. The tool is idempotent. Thus, the agent can safely call it in each
+session.
+
+Use the full example below for a project that does not have Redthread yet.
 
 ## Full example
 
-Copy this into `AGENTS.md` (or `CLAUDE.md`) at your project root and adjust
-the store path and namespaces to taste. Put it near the top of the file —
-agents weight early instructions more heavily, and this one governs the
-first tool call of the session. By default it creates the store as an
-**orphan-branch git worktree of this same repo** — no second remote to
-provision, and this repo's active branch is never touched (see [Worktree
-mode](architecture.md#worktree-mode) for how that works). Prefer an
-independent store repo instead? See [Prefer a separate store
-repo](#prefer-a-separate-store-repo) below.
+Copy this text into `AGENTS.md` (or `CLAUDE.md`) in the root of your
+project. Change the store path and the namespaces as necessary.
+
+Put the text near the top of the file. Agents give more importance to
+instructions that come first, and this text controls the first tool call of
+the session.
+
+By default, the example makes the store as an **orphan-branch git worktree
+of the same repo**. Thus, a second remote is not necessary, and the active
+branch of the repo does not change. For more information, refer to
+[Worktree mode](architecture.md#worktree-mode). To use a separate store
+repo, refer to [Use a separate store repo](#use-a-separate-store-repo)
+below.
 
 ````markdown
 ## Agent memory (Redthread)
 
-This project's long-term memory is a **Redthread store** — a git-backed
-store shared by every session, machine, and agent working on this project.
-It is the only memory that counts here. If the `redthread` MCP server isn't
-connected this session, use the CLI fallback below; if `redthread` isn't
-installed at all, run the one-time setup first, before other work.
+The long-term memory of this project is a **Redthread store**. The store is
+a git repo. All sessions, machines, and agents that work on this project
+use it. Use only this memory for this project.
+
+If the `redthread` MCP server is not connected in this session, use the CLI
+(refer to the table below). If `redthread` is not installed, do the
+one-time setup before you do other work.
 
 ### Rules
 
-1. **Load memory before touching anything.** First action of the session:
-   `context_bootstrap` (one call — pipeline, recent runs, and the memory
-   index), then `memory_read` the entries that look relevant to the task.
-2. **Check you are in the right store before writing.** This project's store
-   is `<project_id>`. If `context_bootstrap` reports a different
-   `project.project_id`, or `store.binding` is anything other than `ok`,
-   STOP: the MCP server is pointed at another project's store. Tell the user
-   and write nothing — memory written there is filed under the wrong project
-   and invisible to this one.
-3. **Never record durable knowledge anywhere else.** Not in the harness's
-   own memory directory (e.g. `~/.claude/projects/**/memory/`), not in a
-   scratch `NOTES.md`, not in a comment. Those are invisible to other
-   sessions, machines, and agents, and they defeat the point of the store.
-   Anything worth remembering goes to `memory_write`.
-4. **Write after every non-trivial task** — anything that changed behavior,
-   took more than a couple of steps, or that the next session would have to
-   rediscover. Namespace `sessions`, key `YYYY-MM-DD_short-slug`, always
-   with a one-line `description`; body covers what changed, why, how it was
-   validated, and what's left. Do it when the task finishes, not batched at
-   the end of the session, and without being asked.
-5. **Put durable conventions and decisions in the `notes` namespace.**
-   Update the existing entry rather than adding a near-duplicate — check
-   `memory_search` first.
-6. **Never store secrets.** The store is a git repo with a shared remote.
-7. **`memory_write` commits for you and pushes in the background.** Check
-   the `sync` field it returns; if it says `failed`, or a later call
-   reports a previous push failed, say so and fix it instead of leaving
-   the entry stranded on this machine.
-8. **Subagents don't inherit this file.** When delegating work worth
-   remembering, tell the subagent to call `context_bootstrap` too, and to
-   report back what belongs in memory.
+1. **Load memory before you change anything.** At the start of the
+   session, call `context_bootstrap` first. This one call gives the
+   pipeline, the recent runs, and the memory index. Then use `memory_read`
+   to read the entries that apply to the task.
+2. **Make sure that you use the correct store before you write.** The
+   store of this project is `<project_id>`. If `context_bootstrap` shows a
+   different `project.project_id`, or if `store.binding` is not `ok`, STOP.
+   The MCP server uses the store of a different project. Tell the user and
+   do not write. Memory that you write there goes to the wrong project, and
+   this project cannot see it.
+3. **Do not record long-term knowledge in other locations.** Do not use
+   the memory directory of the harness (for example,
+   `~/.claude/projects/**/memory/`). Do not use a scratch `NOTES.md` file
+   or a code comment. Other sessions, machines, and agents cannot see these
+   locations. Write all important knowledge with `memory_write`.
+4. **Write memory after each important task.** An important task changed
+   behavior, had more than two steps, or has information that the next
+   session must otherwise find again. Use the namespace `sessions` and the
+   key `YYYY-MM-DD_short-slug`. Always add a one-line `description`. In the
+   body, write what changed, why, how you validated it, and what work
+   remains. Write when the task is complete, not at the end of the session.
+   Do not wait for the user to tell you.
+5. **Put long-term rules and decisions in the `notes` namespace.** First,
+   use `memory_search`. If an entry about the same topic exists, update it.
+   Do not add an almost identical entry.
+6. **Do not store secrets.** The store is a git repo with a shared remote.
+7. **`memory_write` commits the entry and pushes it in the background.**
+   Examine the `sync` field that it returns. If the field shows `failed`,
+   or if a subsequent call shows that a previous push failed, tell the
+   user and correct the problem. Do not leave the entry only on this
+   machine.
+8. **Subagents do not get this file.** When you give important work to a
+   subagent, tell it to call `context_bootstrap`. Also tell it to report
+   the information that must go into memory.
 
-### If the MCP server isn't connected
+### If the MCP server is not connected
 
-Use the CLI — same store, same data, so a missing MCP connection is never a
-reason to skip memory. Each command defaults to `--store ./redthread-store`;
-pass `--store <path>` if yours lives elsewhere.
+Use the CLI. It uses the same store and the same data. Thus, a missing MCP
+connection is not a reason to skip memory. Each command uses
+`--store ./redthread-store` by default. If your store is in a different
+location, add `--store <path>`.
 
 | MCP tool | CLI equivalent |
 | --- | --- |
@@ -91,36 +106,39 @@ pass `--store <path>` if yours lives elsewhere.
 
 ### Git safety
 
-The store is an orphan-branch worktree of this repo, already checked out at
-`./redthread-store`. Never `git checkout`/`git switch` the memory branch in
-this repo's working tree — always reach memory through the tools above or
-that worktree path, so the branch you're working on stays untouched.
+The store is an orphan-branch worktree of this repo. It is already checked
+out at `./redthread-store`. Do not use `git checkout` or `git switch` with
+the memory branch in the working tree of this repo. Always get to memory
+through the tools above or through the worktree path. Then the branch that
+you work on does not change.
 
 ### One-time setup
 
-Only needed if `redthread` isn't installed or `./redthread-store` doesn't
-exist yet. Install Redthread:
+Do these steps only if `redthread` is not installed or if
+`./redthread-store` does not exist. Install Redthread:
 
 ```bash
 uv tool install -U redthread   # or: pip install -U redthread
 ```
 
-Create the store as an orphan-branch worktree of this repo:
+Make the store as an orphan-branch worktree of this repo:
 
 ```bash
 redthread init this-project --phases build,test,present \
   --store ./redthread-store --worktree-repo .
 ```
 
-That command does the rest of the setup itself: it `git init`s this repo if
-it isn't one yet, adds `redthread-store/` to `.gitignore`, and commits the
-`.redthread.yaml` marker to the branch you're on — which is what lets a
-future clone of this repo find the store without anyone repeating any of
-this. It commits those two files and nothing else, so whatever you had
-staged is left alone.
+This command does the remaining setup:
 
-Register the MCP server — run whichever block below matches the platform
-you're running on (skip the rest):
+- If this directory is not a git repo, the command runs `git init`.
+- It adds `redthread-store/` to `.gitignore`.
+- It commits the `.redthread.yaml` marker to the current branch. With this
+  marker, a future clone of this repo finds the store automatically.
+
+The command commits only these two files. It does not change the files
+that you staged before.
+
+Register the MCP server. Run only the block for your platform:
 
 ```bash
 # Claude Code
@@ -142,70 +160,80 @@ webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&
 code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve","--store","./redthread-store"]}'
 ```
 
-Sync it so memory follows the project across machines instead of staying
-stuck on this one — the store's remote is simply this repo's own
-`origin`, so there's no separate remote to set up:
+Sync the store. Then the memory goes with the project to other machines.
+The remote of the store is the `origin` of this repo. Thus, you do not have
+to set up a different remote:
 
 ```bash
 redthread sync --store ./redthread-store
 ```
 ````
 
-!!! danger "Never store secrets"
-    The memory store is a git repo, usually pushed to a shared remote —
-    treat it like any other repo. API keys, tokens, and credentials
-    written to `memory_write` are committed to history and visible to
-    everyone with access to the store.
+!!! danger "Do not store secrets"
+    The memory store is a git repo. Usually, you push it to a shared
+    remote. Use the same security rules as for all other repos. If you
+    write API keys, tokens, or credentials with `memory_write`, git
+    commits them to the history. All persons with access to the store can
+    then see them.
 
-## Why it's written that way
+## Why the example has this structure
 
-Four details in the example do most of the work of getting an agent to
-actually follow it, session after session. Keep them if you rewrite it:
+Four parts of the example make the agent obey it in each session. If you
+write your own version, keep these parts:
 
-- **Policy before setup.** The usage rules come first and the install
-  commands last, because setup runs once and the rules run every session.
-  An agent skimming the file hits the part that applies today.
-- **An explicit ban on other memory files.** Most harnesses ship their own
-  local memory (Claude Code writes under `~/.claude/projects/**/memory/`),
-  and an agent will happily use it unless told not to — leaving memory
-  stranded on one machine, in one harness, invisible to everyone else.
-  Naming that path in the file is what closes the gap.
-- **A CLI fallback for every MCP tool.** If the MCP server isn't connected,
-  an agent with no alternative just drops memory for that session and says
-  nothing. The table turns "unavailable" into "use the other command".
-- **Concrete write triggers.** "After completing a non-trivial task" alone
-  is vague enough to always be deferred; spelling out *when* (task done,
-  not end of session), *where* (`sessions`, `YYYY-MM-DD_short-slug`), and
-  *what* (changed, why, validation, follow-ups) makes it checkable.
+- **The policy comes before the setup.** The setup occurs one time, but the
+  rules apply in each session. Thus, the rules come first and the install
+  commands come last. An agent that reads the file quickly finds the
+  rules first.
+- **The example prohibits other memory files.** Most harnesses have their
+  own local memory. For example, Claude Code writes to
+  `~/.claude/projects/**/memory/`. An agent uses this memory if you do not
+  tell it to stop. Then the memory stays on one machine, in one harness,
+  and nobody else can see it. The example names this path to prevent this
+  problem.
+- **Each MCP tool has a CLI alternative.** If the MCP server is not
+  connected and the agent has no alternative, the agent does not use memory
+  for that session. It also does not tell you. The table gives the agent a
+  different command to use.
+- **The example tells the agent when to write.** The instruction "After
+  you complete an important task" alone is not clear, and agents often
+  postpone it. The example tells the agent *when* (at the end of the task,
+  not at the end of the session), *where* (`sessions`,
+  `YYYY-MM-DD_short-slug`), and *what* (the change, the reason, the
+  validation, the remaining work). Thus, you can make sure that the agent
+  obeys it.
 
-## On another machine
+## On a different machine
 
-Once `.redthread.yaml` is committed, every machine after the first gets
-this for free — clone the code repo and register the MCP server, nothing
-else:
+After you commit `.redthread.yaml`, the setup on each subsequent machine
+is short. Clone the code repo and register the MCP server:
 
 ```bash
 git clone <this-repo-url>
 claude mcp add redthread -- redthread mcp-serve --store ./redthread-store
 ```
 
-The MCP server reads `.redthread.yaml` and attaches the worktree branch
-automatically the first time a tool needs the store — no `redthread init`,
-no `--worktree-repo`/`--branch` flags to remember or redocument. See
-[Discovering a store on a fresh
-machine](architecture.md#discovering-a-store-on-a-fresh-machine-redthreadyaml)
-for exactly how that works, including the repo-mode case (which needs
-`--allow-clone` — cloning a URL read from a committed file is a real trust
-boundary, not a default to cross silently).
+When a tool first uses the store, the MCP server reads `.redthread.yaml`
+and attaches the worktree branch automatically. You do not run
+`redthread init`, and you do not have to remember the
+`--worktree-repo`/`--branch` flags.
 
-## Prefer a separate store repo?
+For the full procedure, refer to [Discovering a store on a fresh
+machine](architecture.md#discovering-a-store-on-a-fresh-machine-redthreadyaml).
+This page also tells about repo mode, which must have `--allow-clone`.
+When Redthread clones a URL from a committed file, this is a security
+boundary. Thus, Redthread does not do it by default.
 
-Worktree mode is the default above because it needs nothing beyond a repo
-you already have — no second remote to create or know in advance. A
-dedicated store repo is still the better choice once the store needs its
-own access control or lifecycle independent of the code it corresponds to
-(see the trade-off in [Worktree mode](architecture.md#worktree-mode)).
-Swap the "One-time setup" commands for:
+## Use a separate store repo
+
+The example above uses worktree mode by default, because worktree mode
+uses only the repo that you already have. You do not have to make a second
+remote or know its URL before you start.
+
+Use a separate store repo if the store must have its own access control or
+lifecycle, independent of the code. For more information, refer to
+[Worktree mode](architecture.md#worktree-mode). In this case, replace the
+"One-time setup" commands with these commands:
 
 ```bash
 redthread init this-project --phases build,test,present --store ./redthread-store
@@ -213,41 +241,45 @@ git -C ./redthread-store remote add origin <your-store-remote-url>
 redthread sync --store ./redthread-store
 ```
 
-(drop the `.gitignore` line — the store is its own repo, not a directory
-inside this one's working tree.)
+Also remove the `.gitignore` line from the setup text. The store is a
+separate repo, not a directory in the working tree of this repo.
 
-## Why bake install steps into AGENTS.md
+## Why the install steps are in AGENTS.md
 
-An agent reading `AGENTS.md` on a fresh clone or a new machine can't
-assume `redthread` is already on `PATH`. Including the install command
-means the *first* thing the agent does with an unfamiliar repo is make
-its own memory tooling available, rather than silently skipping memory for
-that session because the MCP server failed to spawn.
+An agent that reads `AGENTS.md` on a new clone or a new machine cannot
+know if `redthread` is on the `PATH`. The install command makes sure that
+the first action of the agent is to install its memory tools. Without it,
+the MCP server cannot start, and the agent does not use memory for that
+session.
 
-`uv tool install` and `pip install` are equivalent here — pick whichever
-your team already standardizes on. If you'd rather not require a prior
-install at all, swap the `mcp add` line for the `uvx`-based one from
-[Usage](usage.md#connect-your-agent), which fetches `redthread` from PyPI
-on first launch with no separate install step:
+`uv tool install` and `pip install` do the same thing here. Use the tool
+that your team already uses.
+
+If you do not want an install step, replace the `mcp add` line with the
+line that uses `uvx` (refer to [Usage](usage.md#connect-your-agent)). With
+`uvx`, the first start gets `redthread` from PyPI. A separate install
+step is not necessary:
 
 ```bash
 claude mcp add redthread -- uvx redthread mcp-serve --store ./redthread-store
 ```
 
-## Source-checkout variant
+## Source-checkout version
 
-Working from a Redthread source checkout instead of an installed package?
-Replace the install and registration steps with:
+Do you use a Redthread source checkout and not an installed package? Then
+replace the install and registration steps with these commands:
 
 ```bash
 uv sync
 claude mcp add redthread -- uv run --directory /path/to/checkout redthread mcp-serve --store ./redthread-store
 ```
 
-## Where this fits
+## Where this page fits
 
-This page is the full, self-contained version — install, MCP
-registration, and usage policy in one block, meant to be pasted into a
-project that has none of it yet. If your project's `AGENTS.md` already
-covers setup and you just need the memory-usage policy on its own, see the
-shorter snippet in [Usage](usage.md#make-your-agent-actually-use-it-agentsmd).
+This page gives the full version of the text. It contains the install
+steps, the MCP registration, and the usage policy in one block. Paste it
+into a project that does not have Redthread yet.
+
+If the `AGENTS.md` file of your project already contains the setup, use
+only the memory-usage policy. For this shorter text, refer to
+[Usage](usage.md#make-your-agent-use-the-memory-agentsmd).

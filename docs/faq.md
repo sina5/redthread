@@ -1,122 +1,161 @@
 ---
 title: FAQ — Redthread agent memory and pipeline context
-description: Common questions about Redthread — how it compares to local agent memory folders, which MCP clients work, how concurrent writes merge, large-file handling, and Windows/macOS/Linux support.
+description: Frequently asked questions about Redthread. How it compares to local agent memory folders, which MCP clients it supports, how it merges writes that occur at the same time, how it keeps large files, and which operating systems it supports.
 ---
 
 # FAQ
 
 ## What is Redthread?
 
-A portable, git-backed memory store for AI agents and multi-phase
-pipelines. Context entries, artifacts, long-term agent memory, and
-phase-to-phase handoffs live in a git repository whose remote is the source
-of truth — so memory follows the project, not the machine.
+Redthread is a portable, git-backed memory store for AI agents and
+multi-phase pipelines. The store keeps context entries, artifacts,
+long-term agent memory, and handoffs between phases. It is a git
+repository, and its remote is the source of truth. Thus, the memory moves
+with the project, not with the machine.
 
-## How is this different from my agent's local memory folder?
+## How is Redthread different from the local memory folder of my agent?
 
 A `.claude/` or `.agent/` folder is bound to one directory on one machine.
-A Redthread store is a git repo: clone it anywhere and the agent sees the
-same memory — on your laptop, a dev server, or a teammate's machine. It's
-also append-only and content-addressed, so history is never silently
-overwritten and concurrent writers merge cleanly.
+A Redthread store is a git repo. Clone it on a different machine, and the
+agent sees the same memory. This is true for your laptop, a dev server, or
+the machine of a colleague.
 
-## Do I need to run a server?
+The store is also append-only and content-addressed. Thus, Redthread does
+not overwrite history without a record. When two writers write at the same
+time, git merges the changes without conflicts.
 
-No. There is no daemon you must keep alive and no database to host. The hub
-is any git remote — GitHub, GitLab, or a bare repo on a NAS. The optional
-`redthread daemon run` is just a local convenience loop that batches
-commit-and-push on an interval.
+## Must I operate a server?
 
-## Which AI tools work with it?
+No. You do not have to keep a daemon in operation, and you do not have to
+host a database. The hub is a git remote: GitHub, GitLab, or a bare repo on
+a NAS.
 
-Any MCP client that supports stdio servers: Claude Code, Claude Desktop,
-Cursor, Windsurf, VS Code (GitHub Copilot), Codex CLI, Gemini CLI, and the
-Claude Agent SDK are all covered with copy-paste configs in
-[Usage](usage.md#agent-memory-mcp-server). The CLI and Python API work
-with no agent at all.
+The `redthread daemon run` command is optional. It is only a local loop
+that does commit-and-push at an interval.
 
-## Can I add a phase to a project after it's already running?
+## Which AI tools can I use with Redthread?
 
-Yes: `redthread project add-phase <name> --store ./my-store`. It appends
-the phase to `project.yaml` and, by default, backfills it as `pending`
-into every run that isn't already `done`/`failed` — completed runs keep
-their original phase-status snapshot as a historical record rather than
-being rewritten. Pass `--no-backfill` to only affect runs started after
-the change. See [Usage](usage.md#set-up-a-project).
+You can use all MCP clients that support stdio servers. [Usage](usage.md#agent-memory-mcp-server)
+gives configurations that you can copy for these clients:
 
-## Is it only for machine-learning pipelines?
+- Claude Code
+- Claude Desktop
+- Cursor
+- Windsurf
+- VS Code (GitHub Copilot)
+- Codex CLI
+- Gemini CLI
+- Claude Agent SDK
 
-No. Phase names are data, declared per project — `build,test,present` and
-`train,eval,present` run on the exact same core, and a CI guard keeps
-domain vocabulary out of the core modules. If your work has phases and the
-next phase needs what the last one learned, it fits.
+You can also use the CLI and the Python API with no agent.
 
-## What happens if two machines write at the same time?
+## Can I add a phase to a project after it starts?
 
-Nothing bad — that's the design. Every entry is its own file named by a
-ULID, so concurrent writers never collide on a filename, and `sync` does a
-rebase-and-push with bounded retry when another node pushed first. This is
-covered by integration tests that deliberately hammer concurrent appends
-from two clones.
+Yes. Use `redthread project add-phase <name> --store ./my-store`.
 
-## How are large files handled?
+This command adds the phase to `project.yaml`. By default, it also adds
+the phase as `pending` to each run that is not `done` or `failed`.
+Completed runs keep their initial phase-status record. Redthread does not
+change this history.
 
-Small artifacts commit inline into the store repo. Large ones — model
-checkpoints, datasets, build outputs — go through a **blob backend**: the
-bytes live in a content-addressed directory (referenced by sha256) and only
-the pointer is committed to git. Each machine maps the backend's logical
-name to its own local path, so no absolute path ever enters the store.
+To change only the runs that start after this command, add
+`--no-backfill`. Refer to [Usage](usage.md#set-up-a-project).
 
-## Can I keep the store inside my existing code repo?
+## Is Redthread only for machine-learning pipelines?
 
-Yes — [worktree mode](architecture.md#worktree-mode) attaches the store as
-an orphan-branch `git worktree` of your code repo. Your active branch is
-never touched, and no second remote needs provisioning. It's the default
-in the [AGENTS.md example](agents-md.md) for exactly that reason. A
-dedicated store repo is still the better choice once the store needs its
-own access control or lifecycle.
+No. Phase names are data, and each project declares its own phases.
+`build,test,present` and `train,eval,present` use the same core. A CI test
+makes sure that the core modules do not contain domain-specific words.
 
-## How does a new machine know whether the store is a worktree or a separate repo?
+Redthread is applicable to all work that has phases, where each phase must
+know what the previous phase learned.
 
-From a small marker, `.redthread.yaml`, committed in the code repo next to
-`AGENTS.md` — it records the mode, path, and branch (or remote URL).
-`redthread init --worktree-repo` writes *and commits* it automatically
-(along with a `.gitignore` entry for the store directory, and a `git init`
-of the host repo if it needs one); `redthread mcp-serve` reads it and attaches the store itself the first time a tool
-needs it, so a second machine only has to clone the code repo and
-register the same MCP command — no flags to remember. Worktree mode
-attaches freely; a repo-mode store needs `--allow-clone` to auto-clone,
-since that means running `git clone` against a URL read from a committed
-file. See [Discovering a store on a fresh
-machine](architecture.md#discovering-a-store-on-a-fresh-machine-redthreadyaml)
-for the full mechanics, or run `redthread attach` by hand any time.
+## What occurs if two machines write at the same time?
 
-## Does it run on Windows and macOS?
+There is no problem. Redthread has this design:
 
-Yes to both. Redthread is developed on Windows, and CI runs the full test
-suite on Windows, macOS, and Ubuntu on every change. Store paths are
-always POSIX-relative internally, so stores move cleanly between
-operating systems.
+- Each entry is a separate file, and a ULID gives its name. Thus, two
+  writers never use the same filename.
+- If a different node pushed first, `sync` does a rebase and a push again.
+  The number of attempts has a limit.
 
-## I registered the MCP server once in Cursor and now every repo gets the same memory. Why?
+Integration tests make many appends at the same time from two clones to
+make sure that this operates correctly.
 
-Because `--store` pins the server to one store, and Cursor (like Windsurf
-and VS Code's user-level config) reuses a single global registration for
-every project window. The store never changes, so project B's session notes
-land in project A's history.
+## How does Redthread keep large files?
 
-Drop `--store` from the registration. With no store pinned, `mcp-serve`
-runs in discovery mode and resolves the store per call from the workspace's
-own committed `.redthread.yaml` marker — one registration, the right store
-in every repo. A repo with no marker is refused rather than silently served
-someone else's store; `redthread init --worktree-repo .` (new store) or
-`redthread attach --host-repo .` (store already exists) writes and commits
-one. Details in [One registration, many
+Redthread commits small artifacts inline into the store repo.
+
+Large files (model checkpoints, datasets, build outputs) go through a
+**blob backend**. The data is in a content-addressed directory, and a
+sha256 hash identifies it. Git keeps only the pointer.
+
+Each machine maps the logical name of the backend to its own local path.
+Thus, the store never contains an absolute path.
+
+## Can I keep the store in my code repo?
+
+Yes. [Worktree mode](architecture.md#worktree-mode) attaches the store as
+an orphan-branch `git worktree` of your code repo. Your active branch does
+not change, and a second remote is not necessary. For this reason, the
+[AGENTS.md example](agents-md.md) uses worktree mode by default.
+
+Use a separate store repo if the store must have its own access control
+or lifecycle.
+
+## How does a new machine know if the store is a worktree or a separate repo?
+
+A small marker file tells it. The marker is `.redthread.yaml`, and it is
+committed in the code repo near `AGENTS.md`. It records the mode, the
+path, and the branch (or the remote URL).
+
+- `redthread init --worktree-repo` writes the marker *and commits it*
+  automatically. It also adds a `.gitignore` entry for the store directory.
+  If the host directory is not a git repo, it runs `git init` first.
+- `redthread mcp-serve` reads the marker. When a tool first uses the
+  store, the server attaches the store automatically.
+
+Thus, on a second machine, you only clone the code repo and register the
+same MCP command. You do not have to remember flags.
+
+Worktree mode attaches without conditions. Repo mode must have
+`--allow-clone` to clone automatically, because this runs `git clone` on a
+URL from a committed file. For the full procedure, refer to [Discovering a
+store on a fresh
+machine](architecture.md#discovering-a-store-on-a-fresh-machine-redthreadyaml).
+You can also run `redthread attach` manually at any time.
+
+## Does Redthread operate on Windows and macOS?
+
+Yes. The development of Redthread occurs on Windows. For each change, CI
+runs the full test suite on Windows, macOS, and Ubuntu. Internally, store
+paths are always POSIX-relative paths. Thus, you can move stores between
+operating systems without problems.
+
+## I registered the MCP server one time in Cursor. Now all repos get the same memory. Why?
+
+The `--store` flag binds the server to one store. Cursor uses one global
+registration for all project windows. Windsurf and the user-level
+configuration of VS Code do the same. Thus, the store does not change, and
+the session notes of project B go into the history of project A.
+
+To correct this, remove `--store` from the registration. Without a
+`--store` value, `mcp-serve` operates in discovery mode. For each call, it
+finds the store from the committed `.redthread.yaml` marker of the
+workspace. Thus, one registration gives the correct store in each repo.
+
+If a repo has no marker, the server refuses the call. It does not give
+the store of a different project. To write and commit a marker, use one of
+these commands:
+
+- For a new store: `redthread init --worktree-repo .`
+- For a store that exists: `redthread attach --host-repo .`
+
+For more information, refer to [One registration, many
 projects](usage.md#one-registration-many-projects-discovery-mode).
 
-## What's the license?
+## What is the license?
 
 MIT. The source is at
-[github.com/sina5/redthread](https://github.com/sina5/redthread) —
-issues and pull requests are welcome.
-
+[github.com/sina5/redthread](https://github.com/sina5/redthread). You can
+send issues and pull requests.

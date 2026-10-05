@@ -5,50 +5,56 @@ Portable, git-backed memory for AI agents and multi-phase workflows.
 [![CI](https://github.com/sina5/redthread/actions/workflows/ci.yml/badge.svg)](https://github.com/sina5/redthread/actions/workflows/ci.yml)
 [![Docs](https://github.com/sina5/redthread/actions/workflows/docs.yml/badge.svg)](https://sina5.github.io/redthread/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.13-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.14-blue.svg)](CHANGELOG.md)
 
 ![Redthread — a red thread running through every phase of a pipeline](docs/assets/redthread.png)
 
-Your coding agent's memory lives in a local folder (`.claude/`, `.agent/`)
-on one machine. Redthread replaces it with a **git-backed memory store
-served over MCP**: the same memory is visible to your agent on every machine
-that clones the store. The same store carries cross-phase pipeline context
-(e.g. train → eval → present, or build → test → present) as an
-**append-only, content-addressed memory** whose source of truth is a
-**git remote** — any node can clone the store and continue a run, and each
-phase publishes a **curated handoff** to the next.
+A coding agent usually keeps its memory in a local folder (`.claude/`,
+`.agent/`) on one machine. Redthread replaces this folder with a
+**git-backed memory store** that an MCP server gives to the agent. Each
+machine that clones the store shows the same memory to the agent.
 
-Phase names are data, not code: every project declares its own pipeline in
-`project.yaml`. Nothing domain-specific lives below the adapter layer.
+The same store also keeps the context of a multi-phase pipeline, for
+example train → eval → present or build → test → present. This context is
+an **append-only, content-addressed memory**. A **git remote** is its
+source of truth. Any node can clone the store and continue a run. Each
+phase publishes a **curated handoff** to the subsequent phase.
+
+Phase names are data, not code. Each project declares its own pipeline in
+`project.yaml`. Code below the adapter layer has no domain-specific terms.
 
 **[Read the docs →](https://sina5.github.io/redthread/)**
 
 ## Features
 
-- **Agent memory over MCP** — point a coding agent's MCP config (Claude
-  Code, Cursor, Windsurf, VS Code, ...) at a Redthread store instead of a
-  local `.claude`/`.agent` folder.
-- **One registration, many projects** — run `mcp-serve` with no `--store`
-  and every workspace is served the store its own committed
-  `.redthread.yaml` names, so a single global MCP entry (Cursor, Windsurf,
-  VS Code) works across all your repos instead of binding to the first one.
-- **Portable by construction** — every entry is keyed by `project_id` /
-  `run_id` / `phase` / `entry_id`, never by hostname or absolute path. Swap
-  the machine running a phase mid-run with `redthread resume`.
-- **Domain-neutral phase adapters** — the same core drives an ML pipeline
-  (train/eval) and an app pipeline (build/test) with zero special-casing.
-- **Content-addressed artifacts** — small files commit inline; large ones go
-  through a pluggable blob backend, referenced by sha256.
-- **Curated handoffs** — each phase publishes one small, validated contract
-  for the next phase to consume, never the raw entry log.
-- **Report, deck, and docs from handoffs** — `redthread present` renders a
-  markdown report, a slide deck, and a docs-site tree from any run.
-- **Worktree mode** — run the store as an orphan-branch `git worktree` of
-  your existing code repo, so its active branch is never touched.
-- **Auto-attach on a fresh machine** — a committed `.redthread.yaml` marker
-  lets `redthread mcp-serve`/`redthread attach` find and attach the store
-  automatically, so a new clone just needs `git clone` + the same MCP
-  command — no flags to remember.
+- **Agent memory over MCP**: Set the MCP configuration of a coding agent
+  (Claude Code, Cursor, Windsurf, VS Code, and others) to a Redthread store.
+  Do not use a local `.claude`/`.agent` folder.
+- **One registration for many projects**: Run `mcp-serve` without
+  `--store`. Each workspace then gets the store that its committed
+  `.redthread.yaml` file names. Thus, one global MCP entry (Cursor,
+  Windsurf, VS Code) operates correctly in all your repos.
+- **Portable by design**: The key of each entry is `project_id` /
+  `run_id` / `phase` / `entry_id`. The key is never a hostname or an
+  absolute path. To move a phase to a different machine during a run, use
+  `redthread resume`.
+- **Domain-neutral phase adapters**: The same core operates an ML
+  pipeline (train/eval) and an app pipeline (build/test). It has no special
+  cases for each domain.
+- **Content-addressed artifacts**: Redthread commits small files inline.
+  Large files go to a blob backend that you can replace. A sha256 hash
+  identifies each file.
+- **Curated handoffs**: Each phase publishes one small, validated
+  contract for the subsequent phase. The subsequent phase does not read the
+  raw entry log.
+- **Report, deck, and docs from handoffs**: `redthread present` makes a
+  markdown report, a slide deck, and a docs-site tree from a run.
+- **Worktree mode**: The store can be an orphan-branch `git worktree` of
+  your code repo. Redthread does not change the active branch of that repo.
+- **Automatic attach on a new machine**: A committed `.redthread.yaml`
+  marker lets `redthread mcp-serve` and `redthread attach` find and attach
+  the store automatically. On a new clone, only `git clone` and the same
+  MCP command are necessary. You do not have to remember flags.
 
 ## Install
 
@@ -56,25 +62,31 @@ Phase names are data, not code: every project declares its own pipeline in
 pip install redthread          # or: uv tool install redthread
 ```
 
-## Three ways to use it
+## Three ways to use Redthread
 
-### Option 1 — Paste-and-go: let the agent set itself up (recommended)
+### Option 1 — Let the agent do the setup (recommended)
 
 Copy the [AGENTS.md example](https://sina5.github.io/redthread/agents-md/)
-into your project and your agent installs Redthread, creates the store,
-and registers the MCP server itself the next time it opens this project —
-no manual steps at all. By default the store is an **orphan-branch git
-worktree of this same repo**, so there's no second remote to provision
-and this repo's active branch is never touched.
+into your project. The next time the agent opens the project, it does
+these steps:
 
-### Option 2 — Register the MCP server yourself
+1. It installs Redthread.
+2. It makes the store.
+3. It registers the MCP server.
 
-Prefer to do it by hand instead of pasting a file? Create a store, then
-register it with your agent — pick your client:
+You do not do manual steps. By default, the store is an **orphan-branch git
+worktree of the same repo**. Thus, you do not have to set up a second
+remote, and the active branch of the repo does not change.
+
+### Option 2 — Register the MCP server manually
+
+Make a store:
 
 ```bash
 redthread init my-project --phases build,test,present --store ./my-store
 ```
+
+Then register the store with your agent. Select your client:
 
 <details open>
 <summary>🟠 Claude Code</summary>
@@ -83,23 +95,23 @@ redthread init my-project --phases build,test,present --store ./my-store
 claude mcp add redthread -- uvx redthread mcp-serve --store ./my-store
 ```
 
-Already have `redthread` installed? Drop `uvx`:
+If `redthread` is already installed, remove `uvx`:
 
 ```bash
 claude mcp add redthread -- redthread mcp-serve --store ./my-store
 ```
 
-Verify with `/mcp` inside Claude Code — `redthread` should show as connected
-with 18 tools.
+To make sure that the server operates, type `/mcp` in Claude Code. The
+`redthread` server shows as connected with 19 tools.
 
 </details>
 
 <details>
 <summary>⚫ Cursor</summary>
 
-Cursor installs MCP servers via a one-click deeplink rather than a CLI
-command. This generates one and opens it, using only Python (already a
-Redthread dependency):
+Cursor does not install MCP servers with a CLI command. It uses a one-click
+deeplink. This command makes the deeplink and opens it. It uses only
+Python, which Redthread already uses:
 
 ```bash
 python -c "
@@ -110,7 +122,7 @@ webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&
 "
 ```
 
-Accept the install confirmation Cursor opens with to finish.
+Cursor shows an install confirmation. Accept it to complete the procedure.
 
 </details>
 
@@ -121,21 +133,19 @@ Accept the install confirmation Cursor opens with to finish.
 code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","./my-store"]}'
 ```
 
-Use `code-insiders` instead of `code` if you're on the Insiders build.
+If you use the Insiders build, use `code-insiders` instead of `code`.
 
 </details>
 
-Windsurf, Claude Desktop, Codex CLI, Gemini CLI, and the Claude Agent SDK
-connect just as easily — see
-[MCP client setup](https://sina5.github.io/redthread/usage/#connect-your-agent)
-for each.
+You can also connect Windsurf, Claude Desktop, Codex CLI, Gemini CLI, and
+the Claude Agent SDK. For each client, refer to
+[MCP client setup](https://sina5.github.io/redthread/usage/#connect-your-agent).
 
-Once connected, ask the agent to call `agents_md_bootstrap` — it writes the
-same usage policy as Option 1 above into this project's
-`AGENTS.md`/`CLAUDE.md` itself, so future sessions use this memory
-automatically without being told.
+After you connect the agent, tell it to call `agents_md_bootstrap`. This
+tool writes the usage policy from Option 1 into the `AGENTS.md`/`CLAUDE.md`
+file of the project. Future sessions then use this memory automatically.
 
-### Option 3 — Drive it from the CLI (no agent required)
+### Option 3 — Use the CLI (no agent necessary)
 
 ```bash
 redthread run start --store ./my-store
@@ -143,14 +153,15 @@ redthread log <run_id> build note '{"msg": "hello"}' --store ./my-store
 redthread read <run_id> --store ./my-store
 ```
 
-Working from a source checkout instead: `uv sync`, then prefix each command
-with `uv run`.
+If you use a source checkout, run `uv sync` first. Then put `uv run` before
+each command.
 
 ## Docs
 
-Full docs (usage, architecture, store format) are published at
-[sina5.github.io/redthread](https://sina5.github.io/redthread/) and live in
-`docs/`, built with MkDocs Material:
+The full docs (usage, architecture, store format) are at
+[sina5.github.io/redthread](https://sina5.github.io/redthread/). The
+source is in `docs/`. MkDocs Material builds the site. To show the docs
+locally, run this command:
 
 ```bash
 uv run --group docs mkdocs serve
@@ -158,7 +169,7 @@ uv run --group docs mkdocs serve
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for release notes.
+For release notes, refer to [CHANGELOG.md](CHANGELOG.md).
 
 ## Development
 

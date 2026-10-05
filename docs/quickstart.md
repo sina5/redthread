@@ -1,31 +1,33 @@
 ---
 title: Quickstart — give your AI agent portable memory in one minute
-description: Install Redthread, create a git-backed memory store, connect it to Claude Code or another MCP client, and publish your first phase handoff — in under a minute.
+description: Install Redthread, make a git-backed memory store, connect it to Claude Code or a different MCP client, and publish your first phase handoff in less than one minute.
 ---
 
 # Quickstart
 
 ## Install
 
-From PyPI:
+Install from PyPI:
 
 ```bash
 pip install redthread          # or: uv tool install redthread
 ```
 
-Or from a source checkout:
+Or install from a source checkout:
 
 ```bash
 uv sync    # then prefix each `redthread` command below with `uv run`
 ```
 
-## Give your coding agent portable memory (MCP)
+## Give portable memory to your coding agent (MCP)
 
-Create a store, then register it with your agent — pick your client:
+Make a store:
 
 ```bash
 redthread init my-project --phases build,test,present --store ./my-store
 ```
+
+Then register the store with your agent. Select your client:
 
 === "🟠 Claude Code"
 
@@ -33,20 +35,20 @@ redthread init my-project --phases build,test,present --store ./my-store
     claude mcp add redthread -- uvx redthread mcp-serve --store ./my-store
     ```
 
-    Already have `redthread` installed? Drop `uvx`:
+    If `redthread` is already installed, remove `uvx`:
 
     ```bash
     claude mcp add redthread -- redthread mcp-serve --store ./my-store
     ```
 
-    Verify with `/mcp` inside Claude Code — `redthread` should show as
-    connected with 18 tools.
+    To make sure that the server operates, type `/mcp` in Claude Code. The
+    `redthread` server shows as connected with 19 tools.
 
 === "⚫ Cursor"
 
-    Cursor installs MCP servers via a deeplink rather than a CLI command.
-    This generates one and opens it, using only Python (already a
-    Redthread dependency):
+    Cursor does not install MCP servers with a CLI command. It uses a
+    deeplink. This command makes the deeplink and opens it. It uses only
+    Python, which Redthread already uses:
 
     ```bash
     python -c "
@@ -57,7 +59,8 @@ redthread init my-project --phases build,test,present --store ./my-store
     "
     ```
 
-    Already have `redthread` installed? Drop `uvx` from the config:
+    If `redthread` is already installed, remove `uvx` from the
+    configuration:
 
     ```bash
     python -c "
@@ -68,7 +71,8 @@ redthread init my-project --phases build,test,present --store ./my-store
     "
     ```
 
-    Accept the install confirmation Cursor opens with to finish.
+    Cursor shows an install confirmation. Accept it to complete the
+    procedure.
 
 === "🔵 VS Code (Copilot)"
 
@@ -76,41 +80,44 @@ redthread init my-project --phases build,test,present --store ./my-store
     code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","./my-store"]}'
     ```
 
-    Already have `redthread` installed? Drop `uvx`:
+    If `redthread` is already installed, remove `uvx`:
 
     ```bash
     code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve","--store","./my-store"]}'
     ```
 
-    Use `code-insiders` instead of `code` if you're on the Insiders build.
+    If you use the Insiders build, use `code-insiders` instead of `code`.
 
-Ask the agent to call `memory_write`, then `memory_list`, and you'll see
-the files land under `memory/` in the store.
+Tell the agent to call `memory_write` and then `memory_list`. The files
+then show in the `memory/` directory of the store.
 
-!!! tip "Make your agent actually use it"
-    Registering the server only gives the agent the *capability*. Ask it
-    to call `agents_md_bootstrap` and it writes a short policy note into
-    this project's `AGENTS.md`/`CLAUDE.md` itself — idempotent, so it's
-    safe to have the agent call it at the start of every session. Setting
-    up a new project from scratch instead? Copy the [ready-made AGENTS.md
-    example](agents-md.md), which also covers installing Redthread and
-    registering the MCP server in one paste.
+!!! tip "Make your agent use the memory"
+    When you register the server, the agent gets only the *capability*.
+    Tell the agent to call `agents_md_bootstrap`. This tool writes a short
+    policy into the `AGENTS.md`/`CLAUDE.md` file of the project. The tool
+    is idempotent. Thus, the agent can safely call it at the start of each
+    session.
 
-To make that memory portable, give the store a remote and sync it:
+    Do you set up a new project? Then copy the [AGENTS.md
+    example](agents-md.md). This one file also installs Redthread and
+    registers the MCP server.
+
+To make the memory portable, add a remote to the store and sync it:
 
 ```bash
 git -C ./my-store remote add origin git@github.com:you/my-store.git
 redthread sync --store ./my-store
 ```
 
-Any other machine — or teammate, or agent — that clones the store now sees
-the same memory. Windsurf, Claude Desktop, Codex CLI, Gemini CLI, and the
-Claude Agent SDK connect just as easily; see the
-[full per-client reference](usage.md#connect-your-agent) for each.
+Each machine, colleague, or agent that clones the store now sees the same
+memory. You can also connect Windsurf, Claude Desktop, Codex CLI, Gemini
+CLI, and the Claude Agent SDK. For each client, refer to the [full client
+reference](usage.md#connect-your-agent).
 
-## 60-second CLI walkthrough
+## 60-second CLI procedure
 
-The same store tracks multi-phase pipeline runs. One end-to-end pass:
+The same store also records the runs of a multi-phase pipeline. This is
+one full procedure:
 
 ```bash
 # a run is one attempt through your declared phases
@@ -130,11 +137,15 @@ redthread handoff get "$run_id" build --store ./my-store
 redthread read "$run_id" --store ./my-store
 ```
 
-See [Usage](usage.md) for the full command reference — artifacts, blob
-backends for large files, `resume` for continuing a run on another machine,
-and `present` for rendering a report, deck, and docs site from handoffs.
+For the full command reference, refer to [Usage](usage.md). It also
+gives information about these topics:
 
-## Serve these docs locally
+- Artifacts.
+- Blob backends for large files.
+- `resume`, to continue a run on a different machine.
+- `present`, to make a report, a deck, and a docs site from handoffs.
+
+## Show these docs locally
 
 ```bash
 uv run --group docs mkdocs serve

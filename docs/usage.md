@@ -1,13 +1,14 @@
 ---
 title: Usage — CLI and MCP reference for Redthread
-description: Full reference for Redthread — the MCP agent-memory server with per-client setup, plus runs, logging, artifacts, blob backends, sync, resume, and present.
+description: The full reference for Redthread. The MCP agent-memory server with setup for each client, and the commands for runs, logs, artifacts, blob backends, sync, resume, and present.
 ---
 
 # Usage
 
-Every command takes `--store PATH` (defaults to `./redthread-store`). This
-page is the full reference: the MCP agent-memory server first, then the CLI
-grouped by what each command group does.
+Each command accepts `--store PATH`. The default is `./redthread-store`.
+
+This page is the full reference. It starts with the MCP agent-memory
+server. Then it shows the CLI commands in groups, by function.
 
 ## Set up a project
 
@@ -15,79 +16,97 @@ grouped by what each command group does.
 redthread init <project_id> --phases build,test,present [--store PATH] [--name NAME]
 ```
 
-Creates a store and declares its **phase pipeline** — an ordered list of
-arbitrary names. `build,test,present` and `train,eval,present` are equally
-valid; use whatever names fit your project. Every later command validates
-`phase` against this list.
+This command makes a store and declares its **phase pipeline**. The
+pipeline is a list of names in sequence. You can use all names.
+`build,test,present` and `train,eval,present` are both correct. Use the
+names that apply to your project. All subsequent commands make sure that
+each `phase` is in this list.
 
-### Worktree mode — no separate repo needed
+### Worktree mode — a separate repo is not necessary
 
 ```bash
 redthread init demo --phases build,test,present \
   --store ./store-wt --worktree-repo /path/to/your/code-repo --branch redthread-store
 ```
 
-Instead of its own repo, the store becomes an **orphan-branch git worktree**
-of a repo you already have — typically your code repo. `--store` is where
-the worktree gets checked out; `--worktree-repo` never has its active branch
-touched or moved. Good default when you don't want to provision a second
-remote; trades that off against the store's frequent auto-commits landing in
-the same repo as your code (see [Worktree mode](architecture.md#worktree-mode)
-for the trade-off in full). This is the default the
-[AGENTS.md example](agents-md.md) sets up, since it needs nothing beyond a
-repo you already have.
+In this mode, the store is not a separate repo. It is an **orphan-branch
+git worktree** of a repo that you already have, usually your code repo.
 
-It needs even less than that on a brand-new project: if `--worktree-repo`
-isn't a git repo yet, `init` runs `git init -b main` on it first, so a
-project directory you created five minutes ago can host memory without any
-git setup of its own.
+- `--store` is the location where git checks out the worktree.
+- The active branch of the `--worktree-repo` repo never changes or moves.
 
-`init` then finishes the job — it adds the store directory to the host
-repo's `.gitignore` (the store is a worktree, not content of the host
-branch) and commits `.redthread.yaml` to the branch you're on. That commit
-is a pathspec commit touching those two paths only: whatever else you had
-staged stays staged and uncommitted. Pass `--no-commit-marker` if you'd
-rather stage and commit it yourself. If the commit fails — no configured
-git identity, most often — `init` warns and still exits 0, because the
-store itself is created and usable.
+Worktree mode is a good default if you do not want to set up a second
+remote. But the frequent auto-commits of the store go into the same repo as
+your code. For the full comparison, refer to
+[Worktree mode](architecture.md#worktree-mode). The
+[AGENTS.md example](agents-md.md) uses this mode by default, because it
+uses only a repo that you already have.
 
-### Finding the store again on another machine
+On a new project, this mode is even easier. If `--worktree-repo` is not a
+git repo yet, `init` first runs `git init -b main` on it. Thus, a new
+project directory can keep memory without a separate git setup.
 
-`--worktree-repo` always writes a small marker, `.redthread.yaml`, into the
-host repo recording the mode, path, and branch — and commits it, so a
-second machine that just clones the code repo can attach without ever
-passing `--worktree-repo`/`--branch` itself:
+Then `init` completes the setup:
+
+- It adds the store directory to the `.gitignore` file of the host repo.
+  The store is a worktree. It is not content of the host branch.
+- It commits `.redthread.yaml` to the current branch.
+
+This commit is a pathspec commit. It changes only these two paths. Files
+that you staged before stay staged and are not committed. To stage and
+commit the files yourself, add `--no-commit-marker`.
+
+If the commit is not successful, `init` shows a warning but exits with
+code 0. The store exists and you can use it. The usual cause is a missing
+git identity.
+
+### Find the store again on a different machine
+
+`--worktree-repo` always writes a small marker, `.redthread.yaml`, into
+the host repo. The marker records the mode, the path, and the branch.
+`init` also commits the marker. Thus, a second machine that clones the
+code repo can attach the store. It does not have to give
+`--worktree-repo` or `--branch`:
 
 ```bash
 redthread attach [--store PATH] [--host-repo PATH] [--allow-clone]
 ```
 
-`--host-repo` defaults to the current directory. For a plain (non-worktree)
-store, pass `--host-repo` to `init` too, so the marker gets written even
-though there's no `--worktree-repo` to imply it:
+The default value of `--host-repo` is the current directory.
+
+For a plain store (not a worktree), also give `--host-repo` to `init`.
+Then `init` writes the marker, also without `--worktree-repo`:
 
 ```bash
 redthread init demo --phases build,test,present --store ./my-store --host-repo .
 ```
 
-`attach` also doubles as the way a repo-mode marker's `url` gets filled in
-once you've added a remote — run it again after `git remote add origin
-...` and it syncs the marker from the store's actual remote, no separate
-update command needed. `redthread mcp-serve` reads this marker
-automatically too; see [below](#agent-memory-mcp-server). Full mechanics:
+`attach` also fills in the `url` of a repo-mode marker after you add a
+remote. Run `git remote add origin ...`, then run `attach` again. It copies
+the URL of the store remote into the marker. A separate update command is
+not necessary.
+
+`redthread mcp-serve` also reads this marker automatically. Refer to
+[Agent memory (MCP server)](#agent-memory-mcp-server). For the full
+procedure, refer to
 [Discovering a store on a fresh machine](architecture.md#discovering-a-store-on-a-fresh-machine-redthreadyaml).
 
-### Adding a phase later
+### Add a phase later
 
 ```bash
 redthread project add-phase <phase> [--store PATH] [--no-backfill]
 ```
 
-Appends a new phase to the project's pipeline after the fact. By default
-every run that isn't already `done`/`failed` is backfilled with the new
-phase as `pending`, so a mid-flight run can log against it immediately;
-completed runs keep their original phase-status snapshot untouched. Pass
-`--no-backfill` to only affect runs started after the change.
+This command adds a new phase to the pipeline of the project after the
+project starts.
+
+By default, the command also adds the new phase as `pending` to each run
+that is not `done` or `failed`. Thus, a run that is in progress can log to
+the new phase immediately. Completed runs keep their initial phase-status
+record without changes.
+
+To change only the runs that start after this command, add
+`--no-backfill`.
 
 ```bash
 redthread project add-phase deploy --store ./my-store
@@ -100,124 +119,170 @@ redthread mcp-serve [--store PATH] [--host-repo PATH] [--allow-clone]
 redthread mcp-serve   # discovery mode: one registration, every project
 ```
 
-Runs an MCP server (stdio) exposing the store as 18 tools:
-`context_bootstrap` (start here), `store_init`, `run_start`/`run_list`,
-`context_log`/`context_read`, `artifact_put`/`artifact_get`,
-`summary_update`/`summary_get`, `handoff_publish`/`handoff_get`,
-`memory_write`/`memory_read`/`memory_list`/`memory_search`/`memory_import`
-for long-term memory not tied to any run, and `agents_md_bootstrap`
-(below). Point a coding agent's MCP config at this instead of its local
-`.claude`/`.agent` folder — the same memory becomes visible on every
-machine that clones the store.
+This command starts an MCP server (stdio). The server makes the store
+available as 19 tools:
 
-Five conveniences worth knowing before you wire an agent up:
+- `context_bootstrap` (start with this tool).
+- `store_init`.
+- `run_start`/`run_list`.
+- `context_log`/`context_read`.
+- `artifact_put`/`artifact_get`.
+- `summary_update`/`summary_get`.
+- `handoff_publish`/`handoff_get`.
+- `memory_write`/`memory_read`/`memory_list`/`memory_search`/`memory_import`,
+  for long-term memory that is not related to a run.
+- `sync_status`, to show the push state of the store.
+- `agents_md_bootstrap` (refer to the text below).
 
-- **`context_bootstrap` is the front door.** One call returns the phase
-  pipeline, recent runs and their status, published handoffs, and the full
-  memory index with a description per entry — the orientation a cold agent
-  would otherwise need four or five calls to assemble, and usually skips.
-  `redthread bootstrap --store PATH` prints the same payload for humans.
-- **`run_id` is optional on every run-scoped tool.** Omitted, it resolves
-  to the store's newest `active` run, and the id it resolved to comes back
-  in the response — so an agent is never guessing which run it wrote to.
-  Pass it explicitly when several runs are in flight across machines.
-- **Memory is self-describing.** Pass a one-line `description` to
-  `memory_write` and it's stored as YAML frontmatter; `memory_list` returns
-  those descriptions so an agent can tell what's worth opening without
-  reading every entry. `memory_search` covers keys, descriptions, tags, and
-  bodies.
-- **Writing memory publishes it.** `memory_write` commits the entry
-  synchronously and pushes in the background, because an agent that has to
-  remember a second `sync` call sometimes won't — and unpushed memory is
-  invisible to the next machine, which is the point of the store. The call
-  returns at local-disk speed with `sync.status: "pushing"` (`committed`
-  when the store has no remote, `failed` with a `detail` when the commit
-  itself failed); a failed background push is surfaced by the next call on
-  the store under `sync.previous`, and the `sync_status` tool reports the
-  in-flight state, last push outcome, and unpublished-commit count on
-  demand. Pass `push=False` to batch several writes and sync once at the
-  end — the entry is committed either way, so declining to publish never
-  costs you durability. The CLI runs one-shot processes, so `redthread
-  memory write` still pushes synchronously unless you pass `--no-push`.
-- **Memory you already have can be ported in.** `memory_import` (or
-  `redthread memory import <path>`) turns a file or a directory of notes
-  into memory entries — one text file per entry — so a project that arrives
-  with memory in a harness's own directory, a `docs/decisions/` folder, or
-  another store's `memory/` tree doesn't have to be re-typed. See
-  [Porting existing memory in](#porting-existing-memory-in).
+Set the MCP configuration of a coding agent to this server, not to its
+local `.claude`/`.agent` folder. Then each machine that clones the store
+shows the same memory.
 
-The same reads are also exposed as MCP **resources**, for clients that can
-attach context without spending a tool call: `redthread://project`,
-`redthread://memory`, `redthread://bootstrap`, and the templated
-`redthread://memory/{namespace}/{key}`,
-`redthread://handoff/{run_id}/{phase}`,
-`redthread://summary/{run_id}/{phase}`.
+Know these five functions before you connect an agent:
 
-If `--store` doesn't exist yet but `--host-repo` (defaults to the current
-directory) has a `.redthread.yaml` marker, the first tool call attaches
-the store automatically — worktree mode always, repo mode only with
-`--allow-clone` (cloning a URL read from a committed file is a real trust
-boundary). This is what makes a second machine's setup just "clone the
-code repo, register the same MCP command" — no `redthread init`/`attach`
-step required if the store already exists somewhere. See [Finding the
-store again on another machine](#finding-the-store-again-on-another-machine).
+- **Start with `context_bootstrap`.** One call returns the phase pipeline,
+  the recent runs and their status, the published handoffs, and the full
+  memory index with a description for each entry. Without this tool, a new
+  agent must make four or five calls to get this information, and usually
+  it does not make them. `redthread bootstrap --store PATH` shows the same
+  data for persons.
+- **The `run_id` is optional on all run tools.** If you do not give it,
+  the tool uses the newest `active` run of the store. The response
+  contains the `run_id` that the tool used. Thus, the agent always knows
+  which run it wrote to. If runs on different machines are in progress at
+  the same time, give the `run_id`.
+- **Memory entries contain their own descriptions.** Give a one-line
+  `description` to `memory_write`. Redthread keeps it as YAML frontmatter.
+  `memory_list` returns these descriptions. Thus, an agent can find the
+  important entries and does not have to read all entries.
+  `memory_search` searches keys, descriptions, tags, and bodies.
+- **When you write memory, Redthread publishes it.** For details, refer to
+  the subsequent section.
+- **You can import memory that you already have.** `memory_import` (or
+  `redthread memory import <path>`) changes a file or a directory of notes
+  into memory entries. Each text file becomes one entry. The memory can
+  be in the directory of a harness, in a `docs/decisions/` folder, or in
+  the `memory/` tree of a different store. You do not type it again. Refer to [Import memory that you already
+  have](#import-memory-that-you-already-have).
+
+### How `memory_write` publishes memory
+
+`memory_write` commits the entry immediately and pushes it in the
+background. This is because an agent does not always remember to call
+`sync` a second time. Memory that is not pushed is not available on the
+next machine, and portability is the purpose of the store.
+
+The call returns at the speed of the local disk. The response contains a
+`sync.status` value:
+
+- `pushing`: The commit is complete and the push is in progress.
+- `committed`: The store has no remote.
+- `failed`, with a `detail` field: The commit was not successful.
+
+If a background push is not successful, the next call on the store
+reports it in `sync.previous`. The `sync_status` tool shows the push in
+progress, the result of the last push, and the number of commits that are
+not published.
+
+To write many entries and sync only one time at the end, give
+`push=False`. Redthread commits the entry in both cases. Thus, if you do
+not publish, you do not lose data.
+
+The CLI runs a new process for each command. Thus, `redthread memory
+write` pushes immediately, unless you add `--no-push`.
+
+### MCP resources
+
+The server also makes the same data available as MCP **resources**. Some
+clients can attach context without a tool call. These are the resources:
+
+- `redthread://project`
+- `redthread://memory`
+- `redthread://bootstrap`
+- `redthread://memory/{namespace}/{key}`
+- `redthread://handoff/{run_id}/{phase}`
+- `redthread://summary/{run_id}/{phase}`
+
+### Automatic attach
+
+Sometimes `--store` does not exist, but `--host-repo` has a
+`.redthread.yaml` marker. The default `--host-repo` is the current
+directory. In this case, the first tool call attaches the store
+automatically:
+
+- In worktree mode, it always attaches the store.
+- In repo mode, it attaches the store only with `--allow-clone`. When
+  Redthread clones a URL from a committed file, this is a real security
+  boundary.
+
+Thus, the setup on a second machine is short: clone the code repo and
+register the same MCP command. If the store already exists on a remote,
+you do not run `redthread init` or `attach`. Refer to [Find the store
+again on a different machine](#find-the-store-again-on-a-different-machine).
 
 ### One registration, many projects (discovery mode)
 
-`--store` pins the server to one store for its whole life. That is right
-for clients that register MCP servers per project (Claude Code's
-`.mcp.json`), and wrong for clients that keep a single global registration
-and reuse it for every window they open — Cursor's `~/.cursor/mcp.json`,
-Windsurf, VS Code's user-level `mcp.json`. There, one `--store` means every
-repo talks to the *first* repo's store.
+`--store` binds the server to one store for all of its life.
 
-Omit `--store` and the server runs in **discovery mode**: it decides the
-store per call instead of per process.
+- This is correct for clients that register MCP servers for each project,
+  for example the `.mcp.json` file of Claude Code.
+- This is not correct for clients that use one global registration for
+  all windows. Examples are `~/.cursor/mcp.json` of Cursor, Windsurf, and
+  the user-level `mcp.json` of VS Code. With these clients, one `--store`
+  value causes all repos to use the store of the *first* repo.
+
+If you do not give `--store`, the server operates in **discovery mode**.
+It finds the store for each call, not for each process.
 
 ```bash
 redthread mcp-serve
 ```
 
-Each call resolves a workspace, walks up from it to the nearest
-`.redthread.yaml`, and serves the store that marker names. The workspace
-comes from the first of these that answers:
+For each call, the server finds a workspace. Then it goes up the
+directory tree to the nearest `.redthread.yaml` file. It uses the store
+that this marker names. The server uses the first workspace that it finds
+in this list:
 
-1. the `workspace` argument on `context_bootstrap` (also accepted by
-   `store_init`, `memory_write`, and `agents_md_bootstrap`) — the agent
-   passes the absolute path of the project it has open. It sticks for the
-   rest of the session, so later calls need not repeat it.
-2. the client's declared MCP **roots**, asked for automatically when
-   `context_bootstrap` is called without a `workspace`.
-3. `REDTHREAD_WORKSPACE`, for clients that can expand a workspace variable
-   into a server's `env`.
-4. the directory the server was launched in (`--host-repo`, default `.`).
+1. The `workspace` argument of `context_bootstrap`. `store_init`,
+   `memory_write`, and `agents_md_bootstrap` also accept it. The agent
+   gives the absolute path of the project that it has open. The server
+   keeps this value for the remaining session. Thus, subsequent calls do
+   not have to give it again.
+2. The MCP **roots** that the client declares. The server asks for them
+   automatically when `context_bootstrap` has no `workspace` argument.
+3. `REDTHREAD_WORKSPACE`. Use this for clients that can put a workspace
+   variable into the `env` of a server.
+4. The directory where the server started (`--host-repo`, default `.`).
 
-A workspace with no marker in it or any parent is refused, with the
-`redthread init` / `redthread attach` command that would fix it — the
-server never falls back to some other project's store, because a silent
-fallback is exactly the misfiled memory this mode exists to prevent. So
-every repo that should have memory needs its marker committed; `redthread
-init --worktree-repo .` and `redthread attach --host-repo .` both write and
-commit one.
+If the workspace and its parent directories have no marker, the server
+refuses the call. The error message gives the `redthread init` or
+`redthread attach` command that corrects the problem. The server never
+uses the store of a different project. A fallback of this type causes
+the incorrect memory records that this mode prevents.
 
-!!! note "Pinned mode is unchanged"
-    Passing `--store` keeps the old behaviour exactly, including the
-    `store.binding` check that warns when the served store doesn't belong
-    to the workspace. Discovery mode makes that warning unnecessary rather
-    than replacing it: the store it picks is by construction the one the
-    workspace declares.
+Thus, each repo that must have memory must have a committed marker.
+`redthread init --worktree-repo .` and `redthread attach --host-repo .`
+both write and commit a marker.
 
-!!! tip "Skip the manual AGENTS.md paste"
-    Once the server is registered, ask the agent to call
-    `agents_md_bootstrap` — it writes the same policy shown in [Make your
-    agent actually use it](#make-your-agent-actually-use-it-agentsmd)
-    straight into this project's `AGENTS.md` (or `CLAUDE.md`) for you.
-    It's idempotent, so it's safe to have the agent call it at the start
-    of every session — a no-op once the instructions are already there.
+!!! note "Pinned mode does not change"
+    If you give `--store`, the server operates as before. This includes
+    the `store.binding` check. This check shows a warning when the store
+    does not belong to the workspace. Discovery mode does not remove this
+    check, but the warning is not necessary. By design, discovery mode
+    always selects the store that the workspace declares.
+
+!!! tip "You do not have to paste AGENTS.md manually"
+    After you register the server, tell the agent to call
+    `agents_md_bootstrap`. This tool writes the policy from [Make your
+    agent use the memory](#make-your-agent-use-the-memory-agentsmd) into
+    the `AGENTS.md` (or `CLAUDE.md`) file of the project. The tool is
+    idempotent. Thus, the agent can safely call it at the start of each
+    session. If the instructions are already in the file, the tool does
+    nothing.
 
 ### Connect your agent
 
-Pick your client — each tab is ready to paste as-is.
+Select your client. You can paste the text in each tab without changes.
 
 === "🟠 Claude Code"
 
@@ -225,31 +290,34 @@ Pick your client — each tab is ready to paste as-is.
     claude mcp add redthread -- uvx redthread mcp-serve --store /path/to/my-store
     ```
 
-    `uvx` fetches `redthread` from PyPI on first launch, so no checkout or
-    prior install is needed. Already installed (`pip install redthread` or
-    `uv tool install redthread`)? Drop `uvx`:
+    On the first start, `uvx` gets `redthread` from PyPI. Thus, a
+    checkout or an install before this step is not necessary.
+
+    If `redthread` is already installed (`pip install redthread` or
+    `uv tool install redthread`), remove `uvx`:
 
     ```bash
     claude mcp add redthread -- redthread mcp-serve --store /path/to/my-store
     ```
 
-    By default this registers the server for the current project only. Add
-    `--scope user` to make it available in all your projects, or
-    `--scope project` to write a `.mcp.json` you can commit and share with
-    your team.
+    By default, this command registers the server only for the current
+    project. To use it in all your projects, add `--scope user`. To write a
+    `.mcp.json` file that you can commit and share with your team, add
+    `--scope project`.
 
-    Verify with `/mcp` inside Claude Code — `redthread` should show as
-    connected with 18 tools. A quick smoke test is asking the agent to call
-    `context_bootstrap`.
+    To make sure that the server operates, type `/mcp` in Claude Code. The
+    `redthread` server shows as connected with 19 tools. For a quick test,
+    tell the agent to call `context_bootstrap`.
 
-    To run from a source checkout instead, replace `uvx redthread` with
+    To use a source checkout, replace `uvx redthread` with
     `uv run --directory /path/to/checkout redthread`.
 
 === "⚫ Cursor"
 
-    Cursor doesn't have a CLI `add` command — the closest equivalent is a
-    one-click install deeplink. This generates one and opens it, using only
-    Python (already a Redthread dependency, so nothing extra to install):
+    Cursor does not have a CLI `add` command. It uses a one-click install
+    deeplink. This command makes the deeplink and opens it. It uses only
+    Python, which Redthread already uses. Thus, you do not install more
+    software:
 
     ```bash
     python -c "
@@ -260,13 +328,18 @@ Pick your client — each tab is ready to paste as-is.
     "
     ```
 
-    Cursor opens with an install confirmation — accept it to finish.
-    Already have `redthread` installed? Swap `'command': 'uvx'` for
-    `'command': 'redthread'` and drop `redthread` from the front of `args`.
+    Cursor shows an install confirmation. Accept it to complete the
+    procedure.
 
-    To configure by hand instead: Settings → MCP (or *MCP & Integrations*)
-    → *Add Custom MCP*, or edit `.cursor/mcp.json` (project, shareable) /
-    `~/.cursor/mcp.json` (all projects):
+    If `redthread` is already installed, replace `'command': 'uvx'` with
+    `'command': 'redthread'`. Then remove `redthread` from the start of
+    `args`.
+
+    To do the configuration manually, use one of these procedures:
+
+    - Go to Settings → MCP (or *MCP & Integrations*) → *Add Custom MCP*.
+    - Edit `.cursor/mcp.json` (for one project, and you can share it).
+    - Edit `~/.cursor/mcp.json` (for all projects).
 
     ```json
     {
@@ -279,10 +352,11 @@ Pick your client — each tab is ready to paste as-is.
     }
     ```
 
-    **Registering globally?** Cursor reuses one `~/.cursor/mcp.json` entry
-    for every project window, so a hard-coded `--store` sends every repo's
-    memory to the first repo's store. Drop `--store` instead and let each
-    project's own `.redthread.yaml` pick its store:
+    **Do you register the server globally?** Cursor uses one
+    `~/.cursor/mcp.json` entry for all project windows. If the entry
+    contains a fixed `--store`, the memory of all repos goes to the store
+    of the first repo. Thus, remove `--store`. Then the `.redthread.yaml`
+    file of each project selects its store:
 
     ```json
     {
@@ -295,9 +369,9 @@ Pick your client — each tab is ready to paste as-is.
     }
     ```
 
-    See [One registration, many
-    projects](#one-registration-many-projects-discovery-mode). The same
-    applies to Windsurf and to VS Code's user-level `mcp.json`.
+    Refer to [One registration, many
+    projects](#one-registration-many-projects-discovery-mode). This also
+    applies to Windsurf and to the user-level `mcp.json` of VS Code.
 
 === "🔵 VS Code (Copilot)"
 
@@ -305,17 +379,17 @@ Pick your client — each tab is ready to paste as-is.
     code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","/path/to/my-store"]}'
     ```
 
-    Already have `redthread` installed? Drop `uvx`:
+    If `redthread` is already installed, remove `uvx`:
 
     ```bash
     code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve","--store","/path/to/my-store"]}'
     ```
 
-    Use `code-insiders` instead of `code` if you're on the Insiders build.
+    If you use the Insiders build, use `code-insiders` instead of `code`.
 
-    To configure by hand instead: run **MCP: Add Server** in the Command
-    Palette, or create `.vscode/mcp.json`. VS Code uses a `servers` key
-    with an explicit type instead of `mcpServers`:
+    To do the configuration manually, run **MCP: Add Server** in the
+    Command Palette, or make a `.vscode/mcp.json` file. VS Code uses a
+    `servers` key with an explicit type. It does not use `mcpServers`:
 
     ```json
     {
@@ -331,8 +405,9 @@ Pick your client — each tab is ready to paste as-is.
 
 === "Windsurf"
 
-    No CLI equivalent — edit the config directly: Settings → Cascade → MCP
-    Servers, or `~/.codeium/windsurf/mcp_config.json`:
+    Windsurf has no CLI command for this. Edit the configuration directly.
+    Go to Settings → Cascade → MCP Servers, or edit
+    `~/.codeium/windsurf/mcp_config.json`:
 
     ```json
     {
@@ -347,10 +422,11 @@ Pick your client — each tab is ready to paste as-is.
 
 === "Claude Desktop"
 
-    No CLI equivalent — Settings → Developer → Edit Config, which opens
-    `claude_desktop_config.json` (`%APPDATA%\Claude\` on Windows,
-    `~/Library/Application Support/Claude/` on macOS). Restart the app
-    after saving.
+    Claude Desktop has no CLI command for this. Go to Settings → Developer
+    → Edit Config. This opens `claude_desktop_config.json`. The file is in
+    `%APPDATA%\Claude\` on Windows and in
+    `~/Library/Application Support/Claude/` on macOS. After you save the
+    file, start the app again.
 
     ```json
     {
@@ -375,8 +451,8 @@ Pick your client — each tab is ready to paste as-is.
 
 === "Gemini CLI"
 
-    Add the standard `mcpServers` block to `~/.gemini/settings.json` (or
-    `.gemini/settings.json` in the project):
+    Add the standard `mcpServers` block to `~/.gemini/settings.json`. For
+    one project, use `.gemini/settings.json` in the project:
 
     ```json
     {
@@ -391,7 +467,7 @@ Pick your client — each tab is ready to paste as-is.
 
 === "Claude Agent SDK"
 
-    Pass the server definition programmatically:
+    Give the server definition in code:
 
     ```python
     from claude_agent_sdk import ClaudeAgentOptions
@@ -407,66 +483,75 @@ Pick your client — each tab is ready to paste as-is.
     ```
 
 !!! warning "Windows"
-    GUI clients don't always inherit your shell's PATH. If a server fails
-    to spawn, use the absolute path to `uvx.exe` (or the installed
-    `redthread.exe`) as `command`.
+    GUI clients do not always get the PATH of your shell. If the server
+    does not start, use the absolute path to `uvx.exe` (or to the
+    installed `redthread.exe`) as `command`.
 
-### Make your agent actually use it (AGENTS.md)
+### Make your agent use the memory (AGENTS.md)
 
-Registering the server gives the agent the *capability*; a short note in
-your project's instructions file gives it the *habit* — without one, most
-agents won't call memory tools unprompted. Add this to your `AGENTS.md`
-(read by most coding agents) or `CLAUDE.md` and adjust to taste:
+When you register the server, the agent gets the *capability*. A short
+note in the instructions file of your project gives it the *habit*.
+Without this note, most agents do not call memory tools if you do not tell
+them to.
+
+Add this text to your `AGENTS.md` file (most coding agents read it) or to
+`CLAUDE.md`. Change it as necessary:
 
 ````markdown
 ## Memory (Redthread)
 
-This project's long-term memory is a Redthread store (MCP server
-"redthread") shared by every session, machine, and agent working on it.
-It is the only memory that counts here.
+The long-term memory of this project is a Redthread store (MCP server
+"redthread"). All sessions, machines, and agents that work on this
+project use it. Use only this memory for this project.
 
-- At session start, call `context_bootstrap` once — it returns this
-  project's pipeline, recent runs, and the memory index in one call — then
-  `memory_read` whatever looks relevant before making changes.
-- Never record durable knowledge anywhere else: not in the harness's own
-  memory directory (e.g. `~/.claude/projects/**/memory/`), not in a scratch
-  notes file. Those are invisible to other sessions, machines, and agents.
-- After completing a non-trivial task, write a dated summary with
-  `memory_write` (always with a one-line `description`; namespace
-  `sessions`, key like `2026-07-18_short-slug`): what changed, why,
-  validation done, follow-ups. Write when the task finishes, not batched at
-  the end of the session, and without being asked.
-- `memory_write` commits your entry and pushes it in the background, so
-  memory reaches other machines without a second step and without waiting
-  on the network. Check the `sync` field it returns and fix it if it says
-  `failed` — or if a later call reports a previous push failed.
-- Store durable conventions and decisions under the `notes` namespace;
-  never store secrets.
-- If the MCP server isn't connected, use the CLI on the same store rather
-  than skipping memory: `redthread bootstrap`, `redthread memory
+- At the start of the session, call `context_bootstrap` one time. It
+  returns the pipeline, the recent runs, and the memory index of this
+  project in one call. Then use `memory_read` to read the entries that
+  apply before you make changes.
+- Do not record long-term knowledge in other locations. Do not use the
+  memory directory of the harness (for example,
+  `~/.claude/projects/**/memory/`) or a scratch notes file. Other
+  sessions, machines, and agents cannot see these locations.
+- After you complete an important task, write a dated summary with
+  `memory_write`. Always add a one-line `description`. Use the namespace
+  `sessions` and a key like `2026-07-18_short-slug`. Write what changed,
+  why, how you validated it, and the remaining work. Write when the task
+  is complete, not at the end of the session. Do not wait for the user to
+  tell you.
+- `memory_write` commits your entry and pushes it in the background. Thus,
+  the memory goes to other machines without a second step, and you do not
+  wait for the network. Examine the `sync` field that it returns. If it
+  shows `failed`, or if a subsequent call shows that a previous push
+  failed, correct the problem.
+- Put long-term rules and decisions in the `notes` namespace. Do not store
+  secrets.
+- If the MCP server is not connected, use the CLI on the same store. Do
+  not skip memory. Use `redthread bootstrap` and `redthread memory
   list|search|read|write ...`.
 ````
 
-Namespaces are free-form — `sessions` and `notes` are just a convention
-that has worked well; pick whatever fits your team. For a self-contained
-version of this file that also covers installing Redthread and registering
-the MCP server, see the [AGENTS.md example](agents-md.md).
+You can use all namespace names. `sessions` and `notes` are only a
+convention that operates well. Use the names that apply to your team.
 
-!!! danger "Never store secrets"
-    The memory store is a git repo, usually pushed to a shared remote —
-    treat it like any other repo. API keys, tokens, and credentials
-    written to `memory_write` are committed to history and visible to
-    everyone with access to the store.
+For a full version of this file that also installs Redthread and registers
+the MCP server, refer to the [AGENTS.md example](agents-md.md).
+
+!!! danger "Do not store secrets"
+    The memory store is a git repo. Usually, you push it to a shared
+    remote. Use the same security rules as for all other repos. If you
+    write API keys, tokens, or credentials with `memory_write`, git
+    commits them to the history. All persons with access to the store can
+    then see them.
 
 ## Runs
 
-A run is one end-to-end attempt through the pipeline, identified by a ULID.
+A run is one full attempt through the pipeline. A ULID identifies each run.
 
 | Command | Effect |
 |---|---|
-| `redthread run start` | Start a run; prints its `run_id` |
-| `redthread run list` | List all run ids in the store |
-| `redthread bootstrap` | Print the orientation payload: pipeline, recent runs, handoffs, memory index |
+| `redthread run start` | Starts a run and shows its `run_id` |
+| `redthread run list` | Shows all run IDs in the store |
+| `redthread bootstrap` | Shows the start data: pipeline, recent runs, handoffs, memory index |
 
 ```bash
 run_id=$(redthread run start --store ./my-store)
@@ -475,7 +560,7 @@ redthread bootstrap --store ./my-store   # same payload the MCP context_bootstra
 
 ## Long-term memory (CLI)
 
-Memory isn't tied to any run — it's the durable half of the store.
+Memory is not related to a run. It is the long-term part of the store.
 
 ```bash
 redthread memory write <namespace> <key> <file> [--description TEXT] [--tags a,b] [--no-push]
@@ -485,38 +570,46 @@ redthread memory search <query> [--namespace NS] [--limit N]
 redthread memory import <path> [--namespace NS] [--overwrite] [--no-recursive] [--tags a,b]
 ```
 
-`--description` is stored as YAML frontmatter and is what `memory list`
-shows, so it's worth passing every time — an entry nobody can identify from
-a listing is an entry nobody reads again.
+Redthread keeps `--description` as YAML frontmatter, and `memory list`
+shows it. Thus, always give a description. If nobody can identify an
+entry from the list, nobody reads it again.
 
-`memory write` commits the store and pushes it afterwards, so the entry is
-on the remote as soon as it's written, and it prints one line saying which
-of those happened. Pass `--no-push` to write several entries and `redthread
-sync` once at the end: `--no-push` declines the *push* only — the entry is
-still committed, because nobody skipping a push is asking to lose their
-data. A failed push is a warning, not an error: the entry is already
-committed, so the command still exits 0 and tells you to sync once you've
-fixed the cause.
+`memory write` commits the store and then pushes it. Thus, the entry is on
+the remote immediately after you write it. The command shows one line that
+tells which of these steps occurred.
 
-`memory list` marks an entry with `*` when it exists only as a working-tree
-file. That is the difference between written and durable, and it is the one
-thing a listing that reads the working tree cannot otherwise tell you.
+To write many entries and do `redthread sync` only one time at the end,
+add `--no-push`. `--no-push` stops only the *push*. Redthread still
+commits the entry. A person who skips a push does not want to lose data.
 
-## Is my memory actually safe?
+If the push is not successful, Redthread shows a warning, not an error.
+The entry is already committed. Thus, the command still exits with code 0.
+It tells you to sync after you correct the cause.
+
+`memory list` puts a `*` on an entry that exists only as a file in the
+working tree. This mark shows the difference between "written" and
+"committed". A list that reads only the working tree cannot show this
+difference in a different way.
+
+## Is my memory safe?
 
 ```bash
 redthread status --store ./my-store
 ```
 
-One screen of the things that decide whether memory survives and travels:
-the branch (and whether it has any commits at all), the remote, whether
-this store publishes, how many commits are unpushed, and any memory entry
-that isn't committed yet.
+This command shows, on one screen, the items that decide if memory stays
+safe and goes to other machines:
+
+- The branch, and if it has commits.
+- The remote.
+- If this store publishes.
+- The number of commits that are not pushed.
+- Each memory entry that is not committed yet.
 
 ### Publishing
 
-Pushing is a separate decision from committing, because it is the one with
-consequences beyond your machine:
+A push is a different decision from a commit, because a push has effects
+outside your machine:
 
 ```bash
 redthread publish --store ./my-store              # report the current setting
@@ -525,21 +618,29 @@ redthread publish --disable --store ./my-store    # commit locally, never push
 redthread publish --default --store ./my-store    # go back to the default for this store
 ```
 
-Every store publishes by default, because memory that never leaves the
-machine it was written on isn't portable. Know where a **worktree store**
-pushes: it shares the host repo's remotes, so its memory goes wherever the
-project publishes its code. If that is a public repository, or anywhere
-memory shouldn't go, run `redthread publish --disable`. Memory is still
-committed locally on every write. `init --no-publish` sets this from the
-start. The setting lives in the store's `project.yaml`, so it travels with
-the store, and `publish`, `status`, and `init` all name the remote in use.
+By default, each store publishes. Memory that stays on the machine where
+you wrote it is not portable.
 
-A push never holds up the write that triggered it. Over MCP, the push runs
-in the background. From the CLI, `memory write` gives the push
-20 seconds, then reports `committed` and leaves the rest to the next sync.
-Every outcome is recorded on the machine. When a push fails or never
-finishes, the next session's `context_bootstrap` reports it and republishes
-the unpushed commits in the background.
+!!! warning "Know where a worktree store pushes"
+    A **worktree store** uses the remotes of the host repo. Thus, its
+    memory goes to the same location as the code of the project. If this
+    is a public repository, or a location where memory must not go, run
+    `redthread publish --disable`.
+
+Redthread still commits memory locally on each write.
+`init --no-publish` sets this value from the start. The setting is in the
+`project.yaml` file of the store, so it moves with the store. `publish`,
+`status`, and `init` all show the name of the remote that they use.
+
+A push never stops the write that started it:
+
+- Over MCP, the push runs in the background.
+- From the CLI, `memory write` gives the push 20 seconds. Then it reports
+  `committed` and the next sync does the remaining work.
+
+Redthread records each result on the machine. If a push is not successful
+or does not complete, `context_bootstrap` in the next session reports it.
+It then publishes the commits that are not pushed in the background.
 
 ```bash
 redthread memory write notes toolchain.md ./note.md \
@@ -547,13 +648,13 @@ redthread memory write notes toolchain.md ./note.md \
 redthread memory search uv --store ./my-store
 ```
 
-### Porting existing memory in
+### Import memory that you already have
 
-Most projects meet Redthread with memory already written somewhere —
-usually a coding agent's own memory directory, which is exactly the memory
-that never leaves the machine it was written on. `memory import` moves it
-into the store in one command, so adopting Redthread doesn't start with an
-afternoon of copy-paste:
+Most projects already have memory in a different location when they
+start to use Redthread. Usually, it is in the memory directory of a coding
+agent. This memory never goes to other machines. `memory import` moves it
+into the store with one command. Thus, you do not have to copy and paste
+manually:
 
 ```bash
 # a harness's local memory directory
@@ -567,49 +668,50 @@ redthread memory import ./docs/decisions --namespace decisions --store ./my-stor
 redthread memory import ./NOTES.md --namespace notes --store ./my-store
 ```
 
-Agents can do the same through the `memory_import` MCP tool — worth asking
-for explicitly the first time you point one at a project that has notes
-lying around.
+Agents can do the same with the `memory_import` MCP tool. The first time
+you connect an agent to a project that has notes, tell it to use this
+tool.
 
-How it behaves:
+The import operates as follows:
 
-- **One text file, one entry.** The key is the file's path under the source
-  with the extension dropped, so `decisions/db.md` becomes `decisions/db`
-  and whatever structure the notes had survives. Hidden files and
-  directories are skipped, as are non-text extensions.
-- **Content is copied verbatim.** Frontmatter the files already had keeps
-  working — a `description:` or `tags:` block is picked up by `memory list`
-  and `memory search` with no conversion step. Files without frontmatter
-  fall back to their first meaningful line, as usual.
-- **It's a copy, not a move.** Source files are left exactly where they
-  are, so a bad import costs you a namespace and nothing else.
-- **Re-running is safe.** Existing keys are skipped rather than
-  overwritten unless you pass `--overwrite`, and a key whose content
-  already matches is skipped either way. The command prints one line per
-  entry (`imported` / `skipped (exists)` / `skipped (unchanged)`) and a
-  tally.
-- **One commit for the batch.** The whole import is committed and pushed
-  once, not once per entry. `--no-push` opts out of the push; the commit
-  still happens.
-- **A bad file doesn't sink the batch.** Anything unreadable or non-UTF-8
-  is reported on stderr and counted as `failed`; everything else still
-  lands.
+- **Each text file becomes one entry.** The key is the path of the file
+  in the source directory, without the extension. For example,
+  `decisions/db.md` becomes `decisions/db`. Thus, the structure of the
+  notes stays the same. Redthread skips hidden files, hidden directories,
+  and files that are not text.
+- **Redthread copies the content without changes.** Frontmatter in the
+  files continues to operate. `memory list` and `memory search` use a
+  `description:` or `tags:` block without conversion. For files without
+  frontmatter, Redthread uses the first line with content, as usual.
+- **The import is a copy, not a move.** The source files stay in their
+  location. If an import is not correct, you lose only a namespace.
+- **You can safely run the import again.** Redthread skips keys that
+  exist. To overwrite them, add `--overwrite`. Redthread always skips a key
+  whose content is the same. The command shows one line for each entry
+  (`imported` / `skipped (exists)` / `skipped (unchanged)`) and a total.
+- **One commit for all entries.** Redthread commits and pushes the full
+  import one time, not one time for each entry. `--no-push` stops the
+  push. The commit still occurs.
+- **A bad file does not stop the import.** If a file cannot be read or is
+  not UTF-8, Redthread reports it on stderr and counts it as `failed`.
+  Redthread imports all other files.
 
-!!! tip "Check what you're importing"
-    An import is a bulk write to a git repo that's usually shared. Skim the
-    source directory first — old notes are exactly the kind of place a
-    stray API key ends up, and the store is not where you want it to land.
+!!! tip "Examine the files before you import them"
+    An import writes many files to a git repo that is usually shared.
+    Examine the source directory first. Old notes often contain API keys,
+    and you do not want these keys in the store.
 
-## Logging context
+## Log context
 
 ```bash
 redthread log <run_id> <phase> <type> [PAYLOAD_JSON] [--tags a,b]
 ```
 
-- `type` is one of `metric | decision | code_change | artifact_ref | error |
-  milestone | note`.
-- `PAYLOAD_JSON` is a raw JSON object string (defaults to `{}`).
-- Entries are immutable and append-only — there is no edit or delete.
+- `type` is one of these values: `metric | decision | code_change |
+  artifact_ref | error | milestone | note`.
+- `PAYLOAD_JSON` is a raw JSON object string. The default is `{}`.
+- Entries do not change, and you can only add them. You cannot edit or
+  delete an entry.
 
 ```bash
 redthread log "$run_id" build decision '{"note": "switched to strategy B"}' --store ./my-store
@@ -617,8 +719,10 @@ redthread log "$run_id" build decision '{"note": "switched to strategy B"}' --st
 
 ## Artifacts
 
-Register a file as a content-addressed artifact pointer (sha256, verified on
-resolve). `kind` is open-ended (`build`, `checkpoint`, `plot`, `docs`, ...).
+This command registers a file as a content-addressed artifact pointer.
+Redthread makes a sha256 hash and examines it when it reads the artifact.
+You can use all `kind` values (`build`, `checkpoint`, `plot`, `docs`,
+...).
 
 ```bash
 redthread artifact add <run_id> <phase> <source_path> <kind> [--artifact-id ID]
@@ -628,14 +732,15 @@ redthread artifact add <run_id> <phase> <source_path> <kind> [--artifact-id ID]
 redthread artifact add "$run_id" build ./dist/app.bin build --store ./my-store
 ```
 
-## Reading back
+## Read the history
 
 ```bash
 redthread read <run_id> [--phase PHASE] [--type TYPE]
 ```
 
-Prints one JSON entry per line, in creation order. Omit `--phase`/`--type` to
-read the full run history.
+This command shows one JSON entry on each line, in the sequence that
+Redthread made them. To read the full history of the run, do not give
+`--phase` or `--type`.
 
 ```bash
 redthread read "$run_id" --store ./my-store --phase build --type decision
@@ -643,26 +748,28 @@ redthread read "$run_id" --store ./my-store --phase build --type decision
 
 ## Rolling summary
 
-A single mutable markdown file per phase — the agent-maintained digest,
-distinct from the immutable entry log.
+Each phase has one markdown summary file that you can change. The agent
+keeps this summary. It is different from the entry log, which does not
+change.
 
 ```bash
 redthread summary set <run_id> <phase> <markdown_file>
 redthread summary get <run_id> <phase>
 ```
 
-## Handoffs — the phase-to-phase contract
+## Handoffs — the contract between phases
 
-A phase publishes **one curated handoff**, and the next phase should read
-*only* that — never the raw entry log.
+A phase publishes **one curated handoff**. The subsequent phase reads
+*only* this handoff. It does not read the raw entry log.
 
 ```bash
 redthread handoff publish <run_id> <phase> <handoff_json_file>
 redthread handoff get <run_id> <phase>
 ```
 
-The JSON file needs at minimum `headline`; `run_id` and `from_phase` are
-filled in from the command arguments if omitted. Full schema:
+The JSON file must contain at least `headline`. If you do not give
+`run_id` and `from_phase`, Redthread uses the values from the command
+arguments. This is the full schema:
 
 ```json
 {
@@ -677,10 +784,12 @@ filled in from the command arguments if omitted. Full schema:
 
 ## Large artifacts (blob backends)
 
-Small files go through `artifact add` (inline, copied into the store repo).
-For large files — checkpoints, build outputs, datasets — use a **blob
-backend** instead: only the pointer is committed to git; the bytes live in a
-content-addressed directory that every machine resolves independently.
+For small files, use `artifact add`. Redthread copies them inline into the
+store repo.
+
+For large files (checkpoints, build outputs, datasets), use a **blob
+backend**. Git keeps only the pointer. The data is in a content-addressed
+directory, and each machine finds this directory independently.
 
 ```bash
 redthread backend set <name> <local_or_mounted_path>   # per-machine, not in the store
@@ -695,15 +804,18 @@ redthread backend set objects /mnt/shared/redthread-objects --store ./my-store
 redthread artifact add-blob "$run_id" build ./dist/app.bin build --backend objects --store ./my-store
 ```
 
-`backend set` maps a **logical name** to wherever that target happens to be
-mounted on *this* machine — the store itself only ever records the logical
-name, never the path, which is what keeps artifacts portable across nodes.
+`backend set` maps a **logical name** to the mount location of the
+target on *this* machine. The store records only the logical name, never
+the path. Thus, artifacts stay portable between nodes.
 
 ## Sync, resume, and the daemon
 
-The store is a git repo. `sync` does one pull-rebase-commit-push cycle;
-`daemon run` repeats that on an interval; `resume` is how a new machine picks
-up a run after the one running it is gone.
+The store is a git repo.
+
+- `sync` does one pull-rebase-commit-push cycle.
+- `daemon run` does this cycle again at an interval.
+- `resume` lets a new machine continue a run after the previous machine
+  is not available.
 
 ```bash
 redthread sync [--message "..."]
@@ -716,14 +828,19 @@ redthread sync --store ./my-store
 redthread resume "$run_id" --store ./new-clone --remote git@github.com:you/my-store.git
 ```
 
-`resume` clones the store if it isn't present locally (needs `--remote`),
-otherwise pulls the latest; either way it closes out the previous node's
-lineage stint, opens a new one for this machine, and logs a `milestone`
-entry — so the full history shows exactly which machine did what, when.
+If the store is not on the local machine, `resume` clones it. For
+this, you must give `--remote`. If the store is on the local machine, `resume` pulls
+the latest version. Then it does these steps:
 
-For a worktree-mode store, use `--worktree-repo` instead of `--remote` — no
-separate remote URL is needed, since the store's remote is whatever `origin`
-the host (code) repo already has:
+1. It closes the lineage record of the previous node.
+2. It opens a new lineage record for this machine.
+3. It logs a `milestone` entry.
+
+Thus, the full history shows which machine did which work, and when.
+
+For a worktree-mode store, use `--worktree-repo` instead of `--remote`. A
+separate remote URL is not necessary. The remote of the store is the
+`origin` of the host (code) repo:
 
 ```bash
 redthread resume "$run_id" --store ./store-wt \
@@ -736,10 +853,10 @@ redthread resume "$run_id" --store ./store-wt \
 redthread present <run_id> <output_dir> [--phase present]
 ```
 
-Renders `report.md`, `deck.pptx`, and a `docs/` markdown tree from every
-upstream phase's handoff (in pipeline order, as declared in `project.yaml`)
-— never from raw entries. Works the same regardless of what your upstream
-phases were called.
+This command makes `report.md`, `deck.pptx`, and a `docs/` markdown tree.
+It uses the handoff of each upstream phase, in the pipeline sequence from
+`project.yaml`. It never uses raw entries. It operates the same for all
+names of upstream phases.
 
 ```bash
 redthread present "$run_id" ./out --store ./my-store
@@ -762,7 +879,7 @@ redthread read "$run_id" --store ./s                # full raw history
 ```
 
 !!! warning "Windows / PowerShell"
-    Passing inline JSON as a shell argument is quoting-fragile in PowerShell.
-    Write the JSON to a temp file and use the file-based commands
-    (`handoff publish`, `summary set`), or call `redthread.store.LocalStore`
-    directly from Python.
+    In PowerShell, inline JSON in a shell argument often has quoting
+    problems. Write the JSON to a temporary file and use the commands that
+    read files (`handoff publish`, `summary set`). Or call
+    `redthread.store.LocalStore` directly from Python.

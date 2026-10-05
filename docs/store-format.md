@@ -1,12 +1,13 @@
 ---
 title: Store format — Redthread's on-disk schema reference
-description: The on-disk JSON/YAML schema for a Redthread memory store — context entries, content-addressed artifacts, phase handoffs, and run records, all versioned for forward compatibility.
+description: The on-disk JSON/YAML schema for a Redthread memory store. It shows context entries, content-addressed artifacts, phase handoffs, and run records. Each schema has a version number for forward compatibility.
 ---
 
 # Store format
 
-The on-disk schema, as implemented in `src/redthread/models/`. Every schema
-carries `schema_version` for forward compatibility.
+This page shows the on-disk schema. The code for the schema is in
+`src/redthread/models/`. Each schema has a `schema_version` field for
+forward compatibility.
 
 ## project.yaml
 
@@ -20,9 +21,12 @@ created_ts: "2026-07-09T12:00:00Z"
 
 ## ContextEntry
 
-One immutable file per entry: `phases/<phase>/entries/<seq>-<entry_id>.json`.
-`entry_id` (a ULID) is the real identity — `seq` is advisory only, so
-concurrent writers from different nodes never collide on a filename.
+Each entry is one file that does not change:
+`phases/<phase>/entries/<seq>-<entry_id>.json`.
+
+The `entry_id` (a ULID) identifies the entry. The `seq` value is only for
+information. Thus, when writers on different nodes write at the same time,
+they do not use the same filename.
 
 ```json
 {
@@ -44,14 +48,17 @@ concurrent writers from different nodes never collide on a filename.
 }
 ```
 
-`type` is one of `metric | decision | code_change | artifact_ref | error |
-milestone | note`. `provenance` is metadata only — never used for addressing.
+The `type` field has one of these values: `metric | decision | code_change
+| artifact_ref | error | milestone | note`.
+
+The `provenance` field is only metadata. Redthread does not use it to find
+entries.
 
 ## Artifact
 
-A content-addressed pointer, not a payload:
-`phases/<phase>/artifacts/...` (inline backend) plus an entry in
-`artifacts.index.json`.
+An artifact record is a content-addressed pointer. It does not contain the
+data. The data is in `phases/<phase>/artifacts/...` (inline backend). The
+record is also in `artifacts.index.json`.
 
 ```json
 {
@@ -67,12 +74,18 @@ A content-addressed pointer, not a payload:
 }
 ```
 
-`backend` is one of `s3 | minio | rsync | gitlfs | inline`. `inline` and
-`rsync` (a content-addressed directory — local, mounted, or a future real
-`rsync` target) are implemented; `s3`, `minio`, and `gitlfs` are planned.
-For non-inline backends, the `uri` authority (`rsync://<name>/<sha256>`) is a
-**logical backend name**, resolved to a local path per-machine by
-`redthread backend set` — never an absolute path in the store itself.
+The `backend` field has one of these values: `s3 | minio | rsync | gitlfs |
+inline`.
+
+- Redthread supports `inline` and `rsync` now. The `rsync` backend is a
+  content-addressed directory. The directory can be local, mounted, or (in
+  a future release) a real `rsync` target.
+- Support for `s3`, `minio`, and `gitlfs` is planned.
+
+For backends that are not inline, the `uri` authority
+(`rsync://<name>/<sha256>`) is a **logical backend name**. On each machine,
+`redthread backend set` maps this name to a local path. The store never
+contains an absolute path.
 
 ## Handoff — `phases/<phase>/handoff.json`
 
@@ -90,8 +103,9 @@ For non-inline backends, the `uri` authority (`rsync://<name>/<sha256>`) is a
 }
 ```
 
-`key_results` is a free-form dict by design — `val_acc` for an ML run,
-`coverage_pct` for an app build, whatever the domain calls for.
+The `key_results` field is a free-form dict. This is intentional. Put in it
+the values that apply to your domain, for example `val_acc` for an ML run
+or `coverage_pct` for an app build.
 
 ## run.yaml
 
@@ -112,5 +126,5 @@ nodes:
 created_ts: 2026-07-09T09:59:00Z
 ```
 
-`nodes` records every machine that has touched the run — the basis for
-`redthread resume` after a server swap.
+The `nodes` list records each machine that worked on the run. After you
+replace a server, `redthread resume` uses this list.

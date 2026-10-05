@@ -1,18 +1,20 @@
 ---
 title: Architecture — how Redthread's git-backed agent memory works
-description: How Redthread's git-backed store, conflict-free sync, phase adapters, worktree mode, and MCP agent memory fit together — and the two design decisions that carry it all.
+description: How the git-backed store, the sync without conflicts, the phase adapters, worktree mode, and MCP agent memory of Redthread operate together. Two design decisions are the base of the full design.
 ---
 
 # Architecture
 
-Two decisions carry the whole design:
+Two decisions are the base of the full design:
 
-- **Logical identity, never physical.** Everything is keyed by `project_id` /
-  `run_id` / `phase` / `entry_id`. Hostnames, absolute paths, and server IPs
-  are recorded only as *provenance metadata*, never as addresses.
-- **The git remote is the hub, not any node.** Nodes are interchangeable
-  clients. Losing or swapping a node loses nothing, because the node was
-  never the source of truth.
+- **Logical identity, never physical.** The key of each item is
+  `project_id` / `run_id` / `phase` / `entry_id`. Redthread records
+  hostnames, absolute paths, and server IPs only as *provenance metadata*.
+  It never uses them as addresses.
+- **The git remote is the hub, not a node.** All nodes are clients of the
+  same type, and you can replace one with a different one. If you lose or
+  replace a node, you lose no data, because the node was never the source
+  of truth.
 
 ## Data model
 
@@ -26,38 +28,47 @@ Project        A long-lived body of work.            id: slug
          └─ handoff.json    curated contract published to the next phase
 ```
 
-`run_id` is a **ULID** — lexicographically sortable and generated without
-coordination, so any node can mint one offline with no collisions.
+The `run_id` is a **ULID**. You can sort ULIDs in time sequence, and a node
+can make one without a central service. Thus, each node can make a new ID
+offline, and no two IDs are the same.
 
 ### ContextEntry
 
-The atomic, immutable unit of memory. One JSON file per entry, named
-`<seq>-<entry_id>.json`; the ULID `entry_id` is the real identity, so two
-nodes writing concurrently never collide on a filename and merges stay
-conflict-free.
+A context entry is the smallest unit of memory, and it does not change.
+Each entry is one JSON file with the name `<seq>-<entry_id>.json`. The ULID
+`entry_id` identifies the entry. Thus, when two nodes write at the same
+time, they do not use the same filename, and merges have no conflicts.
 
 ### Artifact
 
-A content-addressed **pointer**, not a payload. Small/textual artifacts are
-committed inline; large/binary artifacts (checkpoints, datasets, build
-outputs) are pushed to an object store and referenced by sha256.
+An artifact record is a content-addressed **pointer**. It does not contain
+the data.
+
+- Redthread commits small text artifacts inline.
+- Redthread pushes large binary artifacts (checkpoints, datasets, build
+  outputs) to an object store. A sha256 hash identifies each artifact.
 
 ### handoff.json
 
-The curated contract a phase publishes for the next phase to consume. A
-downstream phase depends **only** on this schema, never on raw entry
-internals — this is what keeps phases loosely coupled and keeps the final
-output (report, deck, docs site) coherent instead of a data dump.
+The handoff is the curated contract that a phase publishes for the
+subsequent phase. A downstream phase uses **only** this schema. It never
+uses the raw entries. Thus, the phases stay loosely coupled. The final
+output (report, deck, docs site) is also clear, and it is not a dump of all
+the data.
 
 ## Store layout
 
-The store is a git repo. It can be **its own repo** (separate remote, `redthread
-init`) or an **orphan-branch worktree of an existing repo** — typically your
-code repo — via `redthread init --worktree-repo <path>`. Worktree mode never
-checks out or moves the host repo's active branch; it attaches a second working
-directory pointed at an orphan branch that shares no history with your code,
-so `git status`/`git log` in your actual working tree are completely
-unaffected. See [Worktree mode](#worktree-mode) below.
+The store is a git repo. It can be one of these two types:
+
+- **A separate repo** with its own remote. Use `redthread init`.
+- **An orphan-branch worktree of a repo that exists**, usually your code
+  repo. Use `redthread init --worktree-repo <path>`.
+
+Worktree mode never checks out or moves the active branch of the host repo.
+It attaches a second working directory to an orphan branch. This branch
+has no shared history with your code. Thus, `git status` and `git log` in
+your working tree show no changes. Refer to [Worktree mode](#worktree-mode)
+below.
 
 ```
 redthread-store/                 (its own git repo, or an orphan-branch worktree)
@@ -80,57 +91,76 @@ redthread-store/                 (its own git repo, or an orphan-branch worktree
 
 ## Sync
 
-Metadata/context syncs through the git remote (tiny, clones in seconds);
-large artifacts sync through a content-addressed blob backend. A small
-auto-commit daemon batches entry writes and does `pull --rebase → commit →
-push` on a debounce. Swapping the machine running a phase becomes
-`clone + resume` — nothing is stranded because nothing was ever *owned* by a
-node.
+Metadata and context sync through the git remote. This data is small, and
+a clone takes only some seconds. Large artifacts sync through a
+content-addressed blob backend.
+
+A small auto-commit daemon collects entry writes. After a short delay, it
+does `pull --rebase → commit → push`.
+
+To move a phase to a different machine, do `clone + resume`. No data stays
+on the old machine, because no node ever *owned* the data.
 
 ## Worktree mode
 
 `LocalStore.init_worktree(host_repo, worktree_path, branch, project_id,
-phases)` creates the store as an orphan branch of `host_repo` — usually your
-code repo — attached via `git worktree add --orphan`, so the branch shares
-no commit history with your code and the host repo's currently checked-out
-branch never moves. `redthread.store.gitio.ensure_worktree` is the single
-entry point for this: it creates the orphan branch if it doesn't exist
-anywhere yet, attaches to an existing local branch if this machine already
-has it, or fetches and attaches to the existing branch on `origin` if a
-different machine created it first — the same three-way case `redthread
-resume` already handles for plain-repo stores.
+phases)` makes the store as an orphan branch of `host_repo`. Usually,
+`host_repo` is your code repo. The function attaches the branch with
+`git worktree add --orphan`. Thus, the branch has no shared commit history
+with your code. The branch that is checked out in the host repo does not
+move.
 
-Because a git worktree shares its parent repo's objects, refs, and remote
-config, **all existing sync machinery (`gitio.sync`, `pull_rebase`, `push`)
-works against a worktree path completely unchanged** — no special-casing
-was needed anywhere else in the sync layer. `resume_worktree(host_repo,
-worktree_path, branch, run_id)` is the worktree-mode counterpart to
-`resume()`; it needs no separate `--remote` argument, since the store's
-remote is simply whatever `origin` the host repo (your code repo) already
-has.
+`redthread.store.gitio.ensure_worktree` is the only entry point for this
+procedure. It does one of these three steps:
 
-Trade-off versus a dedicated store repo: the store's auto-commit daemon
-pushes every 5–15s on a debounce, and those commits land in the *same* repo
-as your code (on a different branch). That's convenient for solo/small-scale
-use — one repo, one remote, no extra provisioning — but a chatty store can
-still show up in that repo's branch list and, depending on hosting-provider
-settings, its activity feed. A dedicated store repo avoids that entirely and
-is the better choice once a store needs its own access control or lifecycle
-independent of the code it corresponds to.
+- If the orphan branch does not exist, it makes the branch.
+- If this machine already has the branch locally, it attaches to it.
+- If a different machine made the branch first, it fetches the branch from
+  `origin` and attaches to it.
+
+`redthread resume` does the same three steps for stores that are plain
+repos.
+
+A git worktree shares the objects, refs, and remote configuration of its
+parent repo. Thus, **the sync functions (`gitio.sync`, `pull_rebase`,
+`push`) operate on a worktree path without changes**. The sync layer has no
+special cases for worktrees.
+
+`resume_worktree(host_repo, worktree_path, branch, run_id)` is the
+worktree-mode version of `resume()`. It does not use a separate `--remote`
+argument. The remote of the store is the `origin` of the host repo (your
+code repo).
+
+### Worktree mode compared with a separate store repo
+
+The auto-commit daemon of the store pushes each 5–15 seconds, after a
+short delay. These commits go into the *same* repo as your code, on a
+different branch.
+
+- This is convenient for one person or a small team. You have one repo,
+  one remote, and no more setup.
+- But a store with many commits can show in the branch list of the repo.
+  With some hosting providers, it can also show in the activity feed.
+
+A separate store repo prevents these problems. Use a separate store repo
+if the store must have its own access control or lifecycle, independent of
+the code.
 
 ## Discovering a store on a fresh machine (`.redthread.yaml`)
 
-Neither `redthread init` nor `redthread init --worktree-repo` persists which
-mode a project uses anywhere — by design, both are just CLI flags, so
-nothing on disk records "this project's store is a worktree of this repo on
-branch X" for a human or an agent to look up later. Left alone, that means
-a second machine has no way to know whether to pass `--remote`,
-`--worktree-repo`, or nothing at all — the human (or whatever documentation
-they wrote down) is the only source of truth.
+`redthread init` and `redthread init --worktree-repo` do not record the
+mode of a project. Both are only CLI flags. Thus, no file on the disk
+records "the store of this project is a worktree of this repo on branch
+X". A person or an agent cannot find this information later.
 
-`.redthread.yaml` closes that gap: a small, git-committed marker in the
-**host (code) repo**, next to `AGENTS.md`/`.mcp.json`, recording the store's
-mode and how to reach it:
+Without more data, a second machine cannot know which flag to use:
+`--remote`, `--worktree-repo`, or no flag. Only the person (or the
+documentation that the person wrote) knows.
+
+The `.redthread.yaml` file gives this information. It is a small marker
+that is committed in the **host (code) repo**, near
+`AGENTS.md`/`.mcp.json`. It records the mode of the store and how to get
+to it:
 
 ```yaml
 schema_version: 1
@@ -141,86 +171,103 @@ store:
   # url: git@github.com:you/project-memories.git   # repo mode instead
 ```
 
-`LocalStore.init_worktree` writes this automatically — worktree mode always
-knows its own host repo, so there's nothing extra to configure. Plain
-`LocalStore.init` writes it only when called with `host_repo=...` (CLI:
-`redthread init --host-repo PATH`), since repo mode's `url` typically isn't
-known yet at `init` time.
+`LocalStore.init_worktree` writes this file automatically. Worktree mode
+always knows its host repo, so no more configuration is necessary.
 
-`redthread.hostconfig.attach(host_repo, store_path, allow_clone=False)` is
-the function that reads the marker and makes `store_path` exist:
+Plain `LocalStore.init` writes the file only when you call it with
+`host_repo=...` (CLI: `redthread init --host-repo PATH`). In repo mode, the
+`url` is usually not known yet when you run `init`.
 
-- **Worktree mode** attaches unconditionally — `gitio.ensure_worktree` does
-  its usual three-way check (local branch → fetch from the host repo's own
-  `origin` → fresh orphan) against whatever `branch` the marker records.
-  This is safe to do automatically: the "remote" is just the code repo you
-  already cloned, not a new trust boundary.
-- **Repo mode** requires `allow_clone=True` to clone a missing store from
-  the marker's `url` — running `git clone` against a URL read from a
-  committed file *is* a real trust boundary (a hostile repo could point it
-  at a poisoned store, and agents act on what they read from memory), so
-  it's never crossed silently. If the store already exists locally instead,
-  `attach` does the reverse: it syncs the marker's `url` from the store's
-  actual `origin` remote — so running `redthread attach` again after
-  `git remote add origin ...` is how a repo-mode marker created before a
-  remote existed gets its `url` filled in, with no separate update command.
+`redthread.hostconfig.attach(host_repo, store_path, allow_clone=False)`
+reads the marker and makes `store_path`:
 
-Two ways this gets used:
+- **Worktree mode** attaches without conditions.
+  `gitio.ensure_worktree` does its usual three checks for the `branch` in
+  the marker. It tries the local branch first. Then it fetches from the
+  `origin` of the host repo. Then it makes a new orphan branch. This is safe to do automatically. The "remote"
+  is the code repo that you already cloned. It is not a new security
+  boundary.
+- **Repo mode** must have `allow_clone=True` to clone a missing store
+  from the `url` in the marker. When Redthread runs `git clone` on a URL
+  from a committed file, this *is* a real security boundary. A dangerous
+  repo can point to a poisoned store, and agents do what they read in
+  memory. Thus, Redthread never crosses this boundary without permission.
+- If the store already exists locally, `attach` does the opposite. It
+  copies the `origin` URL of the store into the `url` of the marker. If
+  you make a repo-mode marker before the remote exists, do these steps:
+  run `git remote add origin ...`, then run `redthread attach` again. This
+  fills in the `url`. A separate update command is not necessary.
 
-- **`redthread attach [--store PATH] [--host-repo PATH] [--allow-clone]`** —
-  for a human (or a script) that wants the store to exist right now.
-- **`redthread mcp-serve`** calls the same logic itself, lazily, the first
-  time a tool needs the store: if `--store` doesn't exist yet but a marker
-  is found in `--host-repo` (defaults to the server's working directory —
-  normally the project root), it attaches automatically before opening the
-  store. `store_init` respects this too: if attach reveals another machine
-  already populated the store, it returns that store's manifest instead of
-  erroring "already exists." The net effect is that a second machine only
-  ever needs to clone the code repo and register the same MCP server
-  command everyone else uses — no flags to remember, no manual clone step.
+Two commands use this function:
+
+- **`redthread attach [--store PATH] [--host-repo PATH] [--allow-clone]`**:
+  A person or a script uses this command to make the store immediately.
+- **`redthread mcp-serve`**: The server uses the same function when a tool
+  first uses the store. If `--store` does not exist but `--host-repo` has a
+  marker, the server attaches the store before it opens it. The default
+  `--host-repo` is the working directory of the server, usually the root of
+  the project.
+
+`store_init` also obeys this procedure. If the attach shows that a
+different machine already filled the store, `store_init` returns the
+manifest of that store. It does not return an "already exists" error.
+
+The result: on a second machine, you only clone the code repo and register
+the same MCP server command as all other users. You do not have to
+remember flags, and you do not clone the store manually.
 
 ## Phase adapters & handoff contracts
 
-Each phase is a producer/consumer of the shared store via a thin adapter —
-the only phase-specific code in the system. The store and sync stay generic;
-an ML pipeline (`train → eval → present`) and an app pipeline
-(`build → test → present`) run on the exact same core.
+Each phase reads from and writes to the shared store through a thin
+adapter. Adapters are the only phase-specific code in the system. The
+store and the sync stay generic. An ML pipeline (`train → eval →
+present`) and an app pipeline (`build → test → present`) use the same core.
 
-`redthread.adapters.base.PhaseAdapter` is the generic lifecycle every domain
-adapter builds on: it marks a phase active on entry, buffers metrics and
-flushes them as one batched entry (never one entry per call), registers
-artifacts, maintains the rolling summary, and publishes the handoff — always
-flushing synchronously on `publish_handoff` and on exit, so curated output
-never depends on the sync daemon being alive. On an unhandled exception it
-logs an `error` entry and marks the phase `failed` before re-raising.
+`redthread.adapters.base.PhaseAdapter` is the generic lifecycle for all
+domain adapters. It does these steps:
 
-`redthread.adapters.examples` holds two thin pipelines built on
-`PhaseAdapter` — `ml_train`/`ml_eval` and `app_build`/`app_test` — proving
-the core carries zero domain vocabulary: a CI test parses every module
-outside `adapters/examples/` and fails if an ML- or app-specific term
-(`epoch`, `checkpoint`, `coverage_pct`, ...) appears anywhere but a
-docstring.
+- When the phase starts, it sets the phase to active.
+- It collects metrics and writes them as one entry. It does not write one
+  entry for each call.
+- It registers artifacts.
+- It updates the rolling summary.
+- It publishes the handoff.
 
-`redthread.adapters.present` is the domain-neutral flip side: it consumes
-**only** the handoffs published by whichever phases precede `present` in
-the project's own pipeline (`store.manifest.phases`), and renders a
-markdown report, a slide deck (python-pptx), and a docs-site markdown tree
-from them — reading identically whether upstream was train/eval or
-build/test. It passes the same domain-vocabulary CI guard as the rest of
-the core.
+The adapter always writes its data immediately on `publish_handoff` and on
+exit. Thus, the curated output does not depend on the sync daemon. If an
+unhandled exception occurs, the adapter logs an `error` entry and sets the
+phase to `failed`. Then it raises the exception again.
+
+`redthread.adapters.examples` contains two thin pipelines that use
+`PhaseAdapter`: `ml_train`/`ml_eval` and `app_build`/`app_test`. They show
+that the core contains no domain-specific words. A CI test parses each
+module outside `adapters/examples/`. If an ML or app term (`epoch`,
+`checkpoint`, `coverage_pct`, ...) occurs outside a docstring, the test
+fails.
+
+`redthread.adapters.present` is the domain-neutral output side. It uses
+**only** the handoffs from the phases before `present` in the pipeline of
+the project (`store.manifest.phases`). From these handoffs, it makes a
+markdown report, a slide deck (python-pptx), and a docs-site markdown
+tree. The output is the same for train/eval and for build/test upstream
+phases. This module also passes the CI test for domain-specific words.
 
 ## Agent memory (MCP)
 
-`redthread.mcp` wraps the store as an MCP server (stdio transport): fourteen
-tools covering runs, context entries, artifacts, summaries, handoffs, and a
-`memory/<namespace>/` tree for long-term agent memory that isn't tied to any
-run. Point a coding agent's MCP config at this instead of its local
-`.claude/`/`.agent/` folder, and the same memory is visible on every machine
-that clones the store — the same portability guarantee the rest of
-Redthread makes, now exposed to an agent instead of a script. `mcp/tools.py`
-holds the actual operations as plain, directly-testable functions;
-`mcp/server.py` is a thin `FastMCP` wrapper around them.
+`redthread.mcp` makes the store available as an MCP server (stdio
+transport). The server has 19 tools for runs, context entries,
+artifacts, summaries, and handoffs. It also has a `memory/<namespace>/`
+tree for long-term agent memory that is not related to a run.
 
-Memory keys are validated against path traversal (`../`, absolute paths,
-backslashes) before touching disk, since these are the one part of the
-store schema an LLM agent supplies free-form.
+Set the MCP configuration of a coding agent to this server, not to its
+local `.claude/`/`.agent/` folder. Then each machine that clones the store
+shows the same memory. This is the same portability that the remaining
+parts of Redthread give to scripts.
+
+- `mcp/tools.py` contains the operations as plain functions that you can
+  test directly.
+- `mcp/server.py` is a thin `FastMCP` wrapper around these functions.
+
+Redthread validates memory keys against path traversal (`../`, absolute
+paths, backslashes) before it writes to the disk. The memory keys are the
+only part of the store schema that an LLM agent writes in free form.
