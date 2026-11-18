@@ -24,7 +24,7 @@ from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
 
 from redthread import constants, hostconfig
-from redthread.store import LocalStore
+from redthread.store import LocalStore, gitio
 from redthread.store.errors import StoreError
 
 
@@ -135,6 +135,34 @@ class StoreRouter:
         self._attach_if_needed(root, store_path)
         return root, store_path
 
+    def plan_new_store(self, workspace: str | Path | None = None) -> tuple[Path, Path] | None:
+        """Where a brand-new store goes for a workspace that declares none:
+        the repo root it sits in, with the store as the conventional
+        ``redthread-store`` orphan-branch worktree beside the code.
+
+        Returns None when a store is already declared (pinned mode, or a
+        marker exists) — the normal path applies then. This is what lets one
+        flagless registration set up any repo without a prior CLI step.
+
+        Raises StoreError for a directory that is clearly not a project (the
+        home directory or a filesystem root), so a client that launched the
+        server from ``~`` cannot turn the user's home into a git repo.
+        """
+        if self._fixed_store is not None:
+            return None
+        hint = self._workspace_hint(workspace)
+        if self._locator.locate(hint) is not None:
+            return None
+        root = gitio.toplevel(hint) if hint.is_dir() else None
+        root = root or hint
+        if root == Path.home().resolve() or root == Path(root.anchor):
+            raise StoreError(
+                f"refusing to create a Redthread store in {root}: it is not a project "
+                "directory. Pass the absolute path of the project you are working in as "
+                "`workspace`."
+            )
+        return root, (root / constants.DEFAULT_STORE_DIRNAME).resolve()
+
     def workspace_for(self, workspace: str | Path | None = None) -> Path:
         """The project directory this call applies to."""
         return self.locate(workspace)[0]
@@ -180,16 +208,16 @@ class StoreRouter:
     def _no_marker_message(self, hint: Path) -> str:
         return (
             f"no {constants.MARKER_FILENAME} found in {hint} or any parent directory, so this "
-            f"workspace does not declare a Redthread store. This server is running in "
-            f"discovery mode (no --store), which means it serves each project the store its "
-            f"own marker names, and refuses rather than guess. Tell the user to run one of:\n"
-            f"  redthread init <project-id> --phases <a,b,c> --worktree-repo . "
-            f"--store ./{constants.DEFAULT_STORE_DIRNAME}   # new store for this repo\n"
-            f"  redthread attach --store <path-to-existing-store> --host-repo .            "
-            f"   # store already exists\n"
-            f"Both write and commit {constants.MARKER_FILENAME}, after which this server "
-            f"finds the store on its own. If the agent's working directory is not the repo "
-            f"root, pass the repo root as the `workspace` argument instead."
+            f"project has no Redthread memory yet. If {hint} is not the project you are "
+            f"working in, retry with that project's absolute path as `workspace`. Otherwise "
+            f"ask the user whether to set up Redthread memory for this repo; if they agree, "
+            f"call store_init with workspace={str(hint)!r} (project_id and phases are "
+            f"optional). That creates the store as an orphan-branch worktree at "
+            f"./{constants.DEFAULT_STORE_DIRNAME} — the checked-out branch is never touched — "
+            f"and commits {constants.MARKER_FILENAME} plus a .gitignore line, so every later "
+            f"session and every clone finds it automatically. To use a store that already "
+            f"exists elsewhere instead, the user runs "
+            f"`redthread attach --store <path> --host-repo .`."
         )
 
 

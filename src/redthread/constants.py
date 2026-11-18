@@ -171,3 +171,6 @@ ARTIFACT_BACKENDS = frozenset({"s3", "minio", "rsync", "gitlfs", "inline"})
 
 TEXT_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".mdx", ""})
 """Suffixes `memory import` treats as importable text."""
+
+# Per-client MCP setup instructions, linked from generated AGENTS.md text.
+DOCS_CONNECT_URL = "https://sina5.github.io/redthread/usage/#connect-your-agent"

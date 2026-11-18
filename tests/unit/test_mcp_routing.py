@@ -90,7 +90,7 @@ def test_unmarked_workspace_refuses_rather_than_guessing(tmp_path):
         router.resolve(plain)
     message = str(excinfo.value)
     assert constants.MARKER_FILENAME in message
-    assert "redthread init" in message
+    assert "store_init" in message
     assert "redthread attach" in message
 
 

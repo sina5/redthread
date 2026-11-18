@@ -9,7 +9,7 @@ from pathlib import Path
 
 from mcp.shared.memory import create_connected_server_and_client_session
 
-from redthread import hostconfig
+from redthread import constants, hostconfig
 from redthread.mcp import tools
 from redthread.mcp.server import build_server
 from redthread.store import LocalStore, gitio
@@ -344,4 +344,57 @@ def test_discovery_refuses_an_unmarked_workspace(tmp_path):
     assert result.isError
     message = result.content[0].text
     assert ".redthread.yaml" in message
-    assert "redthread init" in message
+    assert "store_init" in message
+    assert "ask the user" in message
+
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=path, check=True)
+    (path / "README.md").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=path, check=True)
+    return path
+
+
+def test_discovery_store_init_creates_a_worktree_store_without_flags(tmp_path):
+    repo = _git_repo(tmp_path / "myapp")
+    nested = repo / "src"
+    nested.mkdir()
+
+    async def _run():
+        server = build_server(None, host_repo=tmp_path)
+        async with create_connected_server_and_client_session(server._mcp_server) as session:
+            init = await session.call_tool("store_init", {"workspace": str(nested)})
+            write = await session.call_tool(
+                "memory_write",
+                {"namespace": "notes", "key": "n", "content": "hi", "push": False},
+            )
+            return init, write
+
+    init, write = asyncio.run(_run())
+    assert not init.isError, init.content
+    payload = init.structuredContent
+    assert payload["project_id"] == "myapp"
+    assert payload["phases"] == ["build", "test", "present"]
+    assert payload["created"]["mode"] == "worktree"
+    assert not write.isError, write.content
+
+    store = repo / constants.DEFAULT_STORE_DIRNAME
+    assert tools.memory_read(LocalStore(store), "notes", "n") == "hi"
+    assert (repo / constants.MARKER_FILENAME).exists()
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"], cwd=repo, capture_output=True, text=True, check=True
+    )
+    assert branch.stdout.strip() == "main"
+
+
+def test_discovery_store_init_refuses_the_home_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    result = _discovery_call(tmp_path, "store_init", workspace=str(tmp_path))
+    assert result.isError
+    assert "not a project directory" in result.content[0].text
+    assert not (tmp_path / ".git").exists()

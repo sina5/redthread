@@ -144,11 +144,13 @@ To correct this, remove `--store` from the registration. Without a
 finds the store from the committed `.redthread.yaml` marker of the
 workspace. Thus, one registration gives the correct store in each repo.
 
-If a repo has no marker, the server refuses the call. It does not give
-the store of a different project. To write and commit a marker, use one of
-these commands:
+If a repo has no marker, the server does not give the store of a
+different project. Instead, the agent asks you whether to set up memory
+for the repo. If you agree, it calls `store_init`, which makes an
+orphan-branch worktree store and commits the marker. You can also do this
+yourself:
 
-- For a new store: `redthread init --worktree-repo .`
+- For a new store: `redthread init <project-id> --worktree-repo .`
 - For a store that exists: `redthread attach --host-repo .`
 
 For more information, refer to [One registration, many

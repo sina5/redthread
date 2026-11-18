@@ -592,60 +592,67 @@ def memory_search(
 _AGENTS_MD_MARKER = constants.AGENTS_MD_MARKER
 
 
-def _agents_md_section(store_path: Path, project_id: str | None = None) -> str:
+def _agents_md_section(
+    store_path: Path, project_id: str | None = None, project_dir: Path | None = None
+) -> str:
     # The expected project_id is pinned into the file on purpose: AGENTS.md
     # travels with the repo, so it stays correct even when the MCP server is
-    # registered globally and points somewhere else entirely. That makes the
-    # check possible from the agent's side, with no cooperation from the
-    # client's configuration.
-    identity = (
-        f"- **Check you are in the right store before writing.** This project's store\n"
-        f"  is `{project_id}`. If `context_bootstrap` reports a different\n"
-        f"  `project.project_id`, or `store.binding` is not `ok`, STOP: the MCP server\n"
-        f"  is pointed at another project's store. Say so and do not write — memory\n"
-        f"  written there is filed under the wrong project and invisible to this one.\n"
+    # registered globally and points somewhere else entirely.
+    check = (
+        f"   If `project.project_id` is not `{project_id}`, or `store.binding` is not `ok`,\n"
         if project_id
-        else "- **Check you are in the right store before writing.** If\n"
-        "  `context_bootstrap` reports `store.binding` other than `ok`, STOP: the MCP\n"
-        "  server is pointed at another project's store. Say so and do not write.\n"
+        else "   If `store.binding` is not `ok`,\n"
     )
+    cli_store = _cli_store_flag(store_path, project_dir)
     return (
         f"{_AGENTS_MD_MARKER}\n"
         "## Agent memory (Redthread)\n\n"
-        "This project's long-term memory is a Redthread store (MCP server "
-        f'"redthread", `--store {store_path}`) shared by every session, machine,\n'
-        "and agent working on this project. It is the only memory that counts here.\n\n"
-        "- At session start, call `context_bootstrap` once — it returns this\n"
-        "  project's pipeline, recent runs, and the memory index in one call — then\n"
-        "  `memory_read` what looks relevant before making changes.\n"
-        "- Pass this repo's absolute path as `workspace` on that first\n"
-        "  `context_bootstrap` call. One MCP registration is often shared by every\n"
-        "  project a client has open, and `workspace` is what selects this\n"
-        "  project's store out of them. It sticks for the rest of the session.\n"
-        f"{identity}"
-        "- Never record durable knowledge anywhere else: not in the harness's own\n"
-        "  memory directory (e.g. `~/.claude/projects/**/memory/`), not in a scratch\n"
-        "  notes file. Those are invisible to other sessions, machines, and agents.\n"
-        "- After completing a non-trivial task, write a dated summary with\n"
-        "  `memory_write` (namespace `sessions`, key like `YYYY-MM-DD_short-slug`,\n"
-        "  always with a one-line `description`): what changed, why, validation\n"
-        "  performed, follow-ups. Write when the task finishes, not batched at the\n"
-        "  end of the session, and without being asked.\n"
-        "- `memory_write` commits synchronously and pushes in the background, so\n"
-        "  memory reaches other machines without a second step and without making\n"
-        "  you wait on the network. Check the `sync` field it returns; if it says\n"
-        "  `failed`, or a later call reports a previous push FAILED, say so and\n"
-        "  fix it rather than leaving the entry stranded on this machine\n"
-        "  (`sync_status` confirms a push landed when that matters).\n"
-        "- Store durable conventions and decisions under the `notes` namespace;\n"
-        "  check `memory_search` first and update the existing entry instead of\n"
-        "  adding a near-duplicate. Never store secrets.\n"
-        "- If the MCP server isn't connected, use the CLI on the same store rather\n"
-        f"  than skipping memory: `redthread bootstrap --store {store_path}`,\n"
-        f"  `redthread memory list|search|read|write ... --store {store_path}`.\n"
-        "- Subagents do not inherit this file. When you delegate work that should\n"
-        "  be remembered, tell the subagent to call `context_bootstrap` too.\n"
+        "This project's long-term memory is a Redthread store (MCP server `redthread`).\n"
+        "Every session, machine, and agent on this project shares it. Use no other memory.\n\n"
+        "**If Redthread is missing** (no `redthread` MCP tools and no `redthread` command),\n"
+        "STOP and ask the user to install it before you continue. Do not fall back to\n"
+        "another memory. Suggest these commands, then starting a new session:\n\n"
+        "```bash\n"
+        "uv tool install redthread    # or: pip install redthread\n"
+        "claude mcp add --scope user redthread -- redthread mcp-serve\n"
+        "```\n\n"
+        f"Other clients: {constants.DOCS_CONNECT_URL}\n\n"
+        "If only the MCP tools are missing, suggest the `claude mcp add` line, and\n"
+        "until then use the CLI from the repo root: `redthread bootstrap`,\n"
+        f"`redthread memory list|search|read|write`{cli_store}.\n\n"
+        "**Each session:**\n\n"
+        "1. Call `context_bootstrap` first, with this repo's absolute path as `workspace`.\n"
+        "   Then `memory_read` the entries that apply to the task.\n"
+        f"2. {check.lstrip()}"
+        "   STOP: the server has another project's store. Tell the user. Do not write.\n"
+        "3. If this repo has no store yet, ask the user, then call `store_init`.\n\n"
+        "**Writing memory:**\n\n"
+        "- After each non-trivial task, without being asked, call `memory_write`:\n"
+        "  namespace `sessions`, key `YYYY-MM-DD_short-slug`, a one-line `description`,\n"
+        "  and a body with what changed, why, how you validated it, and what is left.\n"
+        "- Put durable rules and decisions in `notes`. Call `memory_search` first and\n"
+        "  update the existing entry instead of adding a near-duplicate.\n"
+        "- If the returned `sync` field says `failed`, tell the user.\n"
+        "- Never write memory anywhere else (`~/.claude/projects/**/memory/`, scratch\n"
+        "  notes files). Never store secrets: the store is a git repo with a remote.\n"
+        "- Never check out the `redthread-store` branch here. Use the tools.\n"
+        "- Subagents do not read this file. Tell them to call `context_bootstrap`.\n"
     )
+
+
+def _cli_store_flag(store_path: Path, project_dir: Path | None) -> str:
+    """The `--store` the CLI needs from the repo root; empty for the default."""
+    store_path = Path(store_path).resolve()
+    if project_dir is not None:
+        try:
+            rel = store_path.relative_to(Path(project_dir).resolve())
+        except ValueError:
+            rel = None
+        if rel == Path(constants.DEFAULT_STORE_DIRNAME):
+            return ""
+        if rel is not None:
+            return f" with `--store ./{rel.as_posix()}`"
+    return f" with `--store {store_path}`"
 
 
 def agents_md_bootstrap(
@@ -672,7 +679,7 @@ def agents_md_bootstrap(
     else:
         target = agents_md
 
-    section = _agents_md_section(store_path, project_id)
+    section = _agents_md_section(store_path, project_id, project_dir)
     if target.exists():
         existing = target.read_text(encoding="utf-8-sig")
         new_text = existing.rstrip("\n") + "\n\n" + section

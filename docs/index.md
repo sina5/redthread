@@ -26,9 +26,8 @@ curated handoff.
 <span class="rt-term-out">committed the store's scaffolding</span>
 <span class="rt-term-out">committed .redthread.yaml to the host repo (and gitignored the store directory)</span>
 <span class="rt-term-out">publishes: yes — the store has no remote, so nothing can leave this machine</span>
-<span class="rt-term-prompt">$</span> <span class="rt-term-cmd">claude mcp add redthread -- redthread mcp-serve --store ./redthread-store</span>
-<span class="rt-term-out">Added stdio MCP server redthread with command: redthread mcp-serve</span>
-<span class="rt-term-out">--store ./redthread-store to local config</span>
+<span class="rt-term-prompt">$</span> <span class="rt-term-cmd">claude mcp add --scope user redthread -- redthread mcp-serve</span>
+<span class="rt-term-out">Added stdio MCP server redthread with command: redthread mcp-serve to user config</span>
 <span class="rt-term-note"># Memory syncs through the remote of this repo. To keep it local, use `publish --disable`.</span><span class="rt-term-prompt">$</span> <span class="rt-term-cmd">redthread publish</span>
 <span class="rt-term-out">publishes: yes — this store is a worktree of its host repo and pushes to</span>
 <span class="rt-term-out">that repo's remote (git@github.com:acme/myproj.git)</span>
@@ -73,144 +72,61 @@ pip install redthread          # or: uv tool install redthread
 
 ### Option 1 — Let the agent do the setup (recommended)
 
-Put this text into `AGENTS.md` (or `CLAUDE.md`). The next time the agent
-opens the project, it installs Redthread, makes the store, and registers
-the MCP server. You do not do manual steps.
-
-By default, the store is an **orphan-branch git worktree of the same
-repo**. Thus, you do not have to set up a second remote, and the active
-branch of the repo does not change.
+Put this text into `AGENTS.md` (or `CLAUDE.md`), and replace
+`<project_id>`. The next time an agent opens the project, it uses
+Redthread as its memory. If Redthread is not installed on the machine, the
+agent stops and asks you to install it. If the repo has no store yet, the
+agent asks you, and then makes one as an **orphan-branch git worktree of the
+same repo**. Thus, you do not have to set up a second remote, and the
+active branch of the repo does not change.
 
 <div class="scrollable-code" markdown="1">
 ````markdown
 ## Agent memory (Redthread)
 
-The long-term memory of this project is a **Redthread store**. The store is
-a git repo. All sessions, machines, and agents that work on this project
-use it. Use only this memory for this project.
+This project's long-term memory is a Redthread store (MCP server `redthread`).
+Every session, machine, and agent on this project shares it. Use no other memory.
 
-If the `redthread` MCP server is not connected in this session, use the CLI
-(refer to the table below). If `redthread` is not installed, do the
-one-time setup before you do other work.
-
-### Rules
-
-1. **Load memory before you change anything.** At the start of the
-   session, call `context_bootstrap` first. This one call gives the
-   pipeline, the recent runs, and the memory index. Then use `memory_read`
-   to read the entries that apply to the task.
-2. **Do not record long-term knowledge in other locations.** Do not use
-   the memory directory of the harness (for example,
-   `~/.claude/projects/**/memory/`). Do not use a scratch `NOTES.md` file
-   or a code comment. Other sessions, machines, and agents cannot see these
-   locations. Write all important knowledge with `memory_write`.
-3. **Write memory after each important task.** An important task changed
-   behavior, had more than two steps, or has information that the next
-   session must otherwise find again. Use the namespace `sessions` and the
-   key `YYYY-MM-DD_short-slug`. Always add a one-line `description`. In the
-   body, write what changed, why, how you validated it, and what work
-   remains. Write when the task is complete, not at the end of the session.
-   Do not wait for the user to tell you.
-4. **Put long-term rules and decisions in the `notes` namespace.** First,
-   use `memory_search`. If an entry about the same topic exists, update it.
-   Do not add an almost identical entry.
-5. **Do not store secrets.** The store is a git repo with a shared remote.
-6. **`memory_write` commits the entry and pushes it in the background.**
-   Examine the `sync` field that it returns. If the field shows `failed`,
-   or if a subsequent call shows that a previous push failed, tell the
-   user and correct the problem. Do not leave the entry only on this
-   machine.
-7. **Subagents do not get this file.** When you give important work to a
-   subagent, tell it to call `context_bootstrap`. Also tell it to report
-   the information that must go into memory.
-
-### If the MCP server is not connected
-
-Use the CLI. It uses the same store and the same data. Thus, a missing MCP
-connection is not a reason to skip memory. Each command uses
-`--store ./redthread-store` by default. If your store is in a different
-location, add `--store <path>`.
-
-| MCP tool | CLI equivalent |
-| --- | --- |
-| `context_bootstrap` | `redthread bootstrap` |
-| `memory_list` | `redthread memory list [namespace]` |
-| `memory_search` | `redthread memory search <query>` |
-| `memory_read` | `redthread memory read <namespace> <key>` |
-| `memory_write` | `redthread memory write <namespace> <key> <file> --description "..."` |
-
-### Git safety
-
-The store is an orphan-branch worktree of this repo. It is already checked
-out at `./redthread-store`. Do not use `git checkout` or `git switch` with
-the memory branch in the working tree of this repo. Always get to memory
-through the tools above or through the worktree path. Then the branch that
-you work on does not change.
-
-### One-time setup
-
-Do these steps only if `redthread` is not installed or if
-`./redthread-store` does not exist. Install Redthread:
+**If Redthread is missing** (no `redthread` MCP tools and no `redthread` command),
+STOP and ask the user to install it before you continue. Do not fall back to
+another memory. Suggest these commands, then starting a new session:
 
 ```bash
-uv tool install -U redthread   # or: pip install -U redthread
+uv tool install redthread    # or: pip install redthread
+claude mcp add --scope user redthread -- redthread mcp-serve
 ```
 
-Make the store as an orphan-branch worktree of this repo:
+Other clients: https://sina5.github.io/redthread/usage/#connect-your-agent
 
-```bash
-redthread init this-project --phases build,test,present \
-  --store ./redthread-store --worktree-repo .
-```
+If only the MCP tools are missing, suggest the `claude mcp add` line, and
+until then use the CLI from the repo root: `redthread bootstrap`,
+`redthread memory list|search|read|write`.
 
-This command does the remaining setup:
+**Each session:**
 
-- If this directory is not a git repo, the command runs `git init`.
-- It adds `redthread-store/` to `.gitignore`.
-- It commits the `.redthread.yaml` marker to the current branch. With this
-  marker, a future clone of this repo finds the store automatically.
+1. Call `context_bootstrap` first, with this repo's absolute path as `workspace`.
+   Then `memory_read` the entries that apply to the task.
+2. If `project.project_id` is not `<project_id>`, or `store.binding` is not `ok`,
+   STOP: the server has another project's store. Tell the user. Do not write.
+3. If this repo has no store yet, ask the user, then call `store_init`.
 
-The command commits only these two files. It does not change the files
-that you staged before.
+**Writing memory:**
 
-Register the MCP server. Run only the block for your platform:
-
-```bash
-# Claude Code
-claude mcp add redthread -- redthread mcp-serve --store ./redthread-store
-```
-
-```bash
-# Cursor has no CLI add command; this opens a one-click install deeplink
-python -c "
-import base64, json, webbrowser
-config = {'command': 'redthread', 'args': ['mcp-serve', '--store', './redthread-store']}
-encoded = base64.b64encode(json.dumps(config).encode()).decode()
-webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&config={encoded}')
-"
-```
-
-```bash
-# VS Code (GitHub Copilot) — use code-insiders instead of code on Insiders
-code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve","--store","./redthread-store"]}'
-```
-
-Sync the store. Then the memory goes with the project to other machines.
-The remote of the store is the `origin` of this repo. Thus, you do not have
-to set up a different remote:
-
-```bash
-redthread sync --store ./redthread-store
-```
+- After each non-trivial task, without being asked, call `memory_write`:
+  namespace `sessions`, key `YYYY-MM-DD_short-slug`, a one-line `description`,
+  and a body with what changed, why, how you validated it, and what is left.
+- Put durable rules and decisions in `notes`. Call `memory_search` first and
+  update the existing entry instead of adding a near-duplicate.
+- If the returned `sync` field says `failed`, tell the user.
+- Never write memory anywhere else (`~/.claude/projects/**/memory/`, scratch
+  notes files). Never store secrets: the store is a git repo with a remote.
+- Never check out the `redthread-store` branch here. Use the tools.
+- Subagents do not read this file. Tell them to call `context_bootstrap`.
 ````
 </div>
 
-The [full AGENTS.md example](agents-md.md) has more versions of this
-text:
-
-- A version that uses `uvx` and has no install step.
-- A version for a Redthread source checkout.
-- A version for a separate store repo (not a worktree).
+For the reasons behind this structure, refer to the [AGENTS.md
+example](agents-md.md).
 
 After you commit `.redthread.yaml`, the setup on each subsequent machine is
 short. Clone the code repo and register the same MCP server command. The
@@ -227,25 +143,22 @@ machine](architecture.md#discovering-a-store-on-a-fresh-machine-redthreadyaml).
 
 ### Option 2 — Register the MCP server manually
 
-Make a store:
-
-```bash
-redthread init my-project --phases build,test,present --store ./my-store
-```
-
-Then register the store with your agent. Select your client. You can paste
-each command without changes:
+Register the server one time. You do not make a store first, and you do not
+give a `--store` path: the same registration serves every project. The first
+time an agent uses Redthread in a repo, it asks you, then calls `store_init`,
+which makes the store as an orphan-branch worktree at `./redthread-store`.
+Select your client. You can paste each command without changes:
 
 === "🟠 Claude Code"
 
     ```bash
-    claude mcp add redthread -- uvx redthread mcp-serve --store ./my-store
+    claude mcp add --scope user redthread -- uvx redthread mcp-serve
     ```
 
     If `redthread` is already installed, remove `uvx`:
 
     ```bash
-    claude mcp add redthread -- redthread mcp-serve --store ./my-store
+    claude mcp add --scope user redthread -- redthread mcp-serve
     ```
 
     To make sure that the server operates, type `/mcp` in Claude Code. The
@@ -260,7 +173,7 @@ each command without changes:
     ```bash
     python -c "
     import base64, json, webbrowser
-    config = {'command': 'uvx', 'args': ['redthread', 'mcp-serve', '--store', './my-store']}
+    config = {'command': 'uvx', 'args': ['redthread', 'mcp-serve']}
     encoded = base64.b64encode(json.dumps(config).encode()).decode()
     webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&config={encoded}')
     "
@@ -272,7 +185,7 @@ each command without changes:
 === "🔵 VS Code (Copilot)"
 
     ```bash
-    code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","./my-store"]}'
+    code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve"]}'
     ```
 
     If you use the Insiders build, use `code-insiders` instead of `code`.

@@ -23,29 +23,13 @@ hooks:
   - hooks/cache_bust.py
 
 extra:
-  # Analytics is consent-gated, same as sinafathi.com — the tag only loads
-  # once the visitor accepts. No ads cookie here; these docs carry no ads.
-  consent:
-    title: Cookie Consent
-    description: >-
-      These docs use cookies for traffic analytics (Google Analytics), so I can
-      see which pages actually help people. Everything works the same either
-      way — you can change your preference any time from the footer.
-    cookies:
-      analytics:
-        name: Google Analytics
-        checked: true
-    actions:
-      - manage
-      - accept
-  analytics:
-    provider: google
-    property: G-E83LZ5FTKV
+  # Cloudflare Web Analytics, same token as sinafathi.com. It is cookieless,
+  # so there is no consent banner; docs/overrides/main.html emits the beacon.
+  cloudflare_analytics: 923a610b41384f57a2a602a687393a61
 
 copyright: >
   Copyright &copy; 2026 <a href="https://sinafathi.com">Sina Fathi-Kazerooni</a> –
-  <a href="https://sinafathi.com/policy/">Privacy Policy</a> –
-  <a href="#__consent">Change cookie settings</a>
+  <a href="https://sinafathi.com/policy/">Privacy Policy</a>
 
 theme:
   name: material

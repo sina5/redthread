@@ -21,24 +21,21 @@ uv sync    # then prefix each `redthread` command below with `uv run`
 
 ## Give portable memory to your coding agent (MCP)
 
-Make a store:
-
-```bash
-redthread init my-project --phases build,test,present --store ./my-store
-```
-
-Then register the store with your agent. Select your client:
+Register the server one time. You do not make a store first, and you do not give a
+`--store` path: the same registration serves every project. The first time an agent
+uses Redthread in a repo, it asks you, then calls `store_init`, which makes the store
+as an orphan-branch worktree at `./redthread-store`. Select your client:
 
 === "🟠 Claude Code"
 
     ```bash
-    claude mcp add redthread -- uvx redthread mcp-serve --store ./my-store
+    claude mcp add --scope user redthread -- uvx redthread mcp-serve
     ```
 
     If `redthread` is already installed, remove `uvx`:
 
     ```bash
-    claude mcp add redthread -- redthread mcp-serve --store ./my-store
+    claude mcp add --scope user redthread -- redthread mcp-serve
     ```
 
     To make sure that the server operates, type `/mcp` in Claude Code. The
@@ -53,7 +50,7 @@ Then register the store with your agent. Select your client:
     ```bash
     python -c "
     import base64, json, webbrowser
-    config = {'command': 'uvx', 'args': ['redthread', 'mcp-serve', '--store', './my-store']}
+    config = {'command': 'uvx', 'args': ['redthread', 'mcp-serve']}
     encoded = base64.b64encode(json.dumps(config).encode()).decode()
     webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&config={encoded}')
     "
@@ -65,7 +62,7 @@ Then register the store with your agent. Select your client:
     ```bash
     python -c "
     import base64, json, webbrowser
-    config = {'command': 'redthread', 'args': ['mcp-serve', '--store', './my-store']}
+    config = {'command': 'redthread', 'args': ['mcp-serve']}
     encoded = base64.b64encode(json.dumps(config).encode()).decode()
     webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&config={encoded}')
     "
@@ -77,13 +74,13 @@ Then register the store with your agent. Select your client:
 === "🔵 VS Code (Copilot)"
 
     ```bash
-    code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","./my-store"]}'
+    code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve"]}'
     ```
 
     If `redthread` is already installed, remove `uvx`:
 
     ```bash
-    code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve","--store","./my-store"]}'
+    code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve"]}'
     ```
 
     If you use the Insiders build, use `code-insiders` instead of `code`.
