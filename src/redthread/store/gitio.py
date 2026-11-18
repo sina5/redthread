@@ -146,6 +146,14 @@ def is_repo(path: Path) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
+def toplevel(path: Path) -> Path | None:
+    """The root of the git work tree `path` sits in, or None outside one."""
+    result = _run(["rev-parse", "--show-toplevel"], cwd=path, check=False)
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return Path(result.stdout.strip()).resolve()
+
+
 def ensure_repo(path: Path, branch: str = "main") -> bool:
     """Make `path` a git repo if it isn't one already; returns True if this
     call created it. Lets a brand-new project become a Redthread host without

@@ -17,6 +17,9 @@ from redthread.mcp import tools
 from redthread.mcp.routing import ClientRootsProbe, StoreRouter
 from redthread.store import LocalStore, StoreError
 
+# Same pipeline `redthread init` declares when --phases is omitted.
+_DEFAULT_PHASES = ("build", "test", "present")
+
 
 def build_server(
     store_path: Path | None = None, host_repo: Path | None = None, allow_clone: bool = False
@@ -69,18 +72,49 @@ def build_server(
 
     @mcp.tool()
     def store_init(
-        project_id: str,
-        phases: list[str],
+        project_id: str | None = None,
+        phases: list[str] | None = None,
         name: str | None = None,
         workspace: str | None = None,
     ) -> dict[str, Any]:
-        """Create the store this server points at, if it doesn't exist yet.
-        If a .redthread.yaml marker points here and another machine already
-        populated the store, attaches to it instead of erroring.
-        In discovery mode (the server started with no --store) the workspace
-        must already declare a store with a .redthread.yaml marker, which
-        `redthread init` writes."""
-        _, target = router.ensure_attached(workspace)
+        """Create this project's store if it doesn't exist yet. If a
+        .redthread.yaml marker already names a store that another machine
+        populated, attaches to it instead of creating a new one.
+
+        When the workspace has no marker at all, the store is created as an
+        orphan-branch git worktree of the project's repo at ./redthread-store
+        (the checked-out branch is never touched), and .redthread.yaml plus a
+        .gitignore entry are committed so later sessions and clones find it.
+        That commit lands on the user's current branch, so ask the user
+        before calling this on a project without Redthread memory.
+
+        project_id defaults to the repo directory's name; phases default to
+        build, test, present. Pass `workspace` (the project's absolute path)."""
+        phases = phases or list(_DEFAULT_PHASES)
+        planned = router.plan_new_store(workspace)
+        if planned is not None:
+            root, target = planned
+            created = LocalStore.init_worktree(
+                root,
+                target,
+                constants.DEFAULT_STORE_BRANCH,
+                project_id=project_id or root.name,
+                phases=phases,
+                name=name,
+            )
+            router.locate(str(root), bind=True)
+            return {
+                **created.manifest.model_dump(mode="json"),
+                "created": {
+                    "mode": "worktree",
+                    "store": str(target),
+                    "branch": constants.DEFAULT_STORE_BRANCH,
+                    "workspace": str(root),
+                    "marker": created.marker_status,
+                },
+            }
+        root, target = router.ensure_attached(workspace)
+        project_id = project_id or root.name
         if (target / constants.PROJECT_FILENAME).exists():
             return _store(workspace).manifest.model_dump(mode="json")
         store = LocalStore.init(target, project_id=project_id, phases=phases, name=name)

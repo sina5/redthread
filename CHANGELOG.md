@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.15] - 2026-11-18
+
+### Changed
+
+- **One flagless MCP registration now covers every project.** In
+  discovery mode (`redthread mcp-serve` with no `--store`), `store_init`
+  on a repo with no `.redthread.yaml` used to refuse and send you to the
+  CLI. Now it creates the store itself: an orphan-branch worktree at
+  `./redthread-store` in the repo root, with the marker and a `.gitignore`
+  line committed to the current branch. `project_id` (defaults to the repo
+  directory name) and `phases` (defaults to `build,test,present`) are now
+  optional. It refuses to work in the home directory or a filesystem
+  root. The no-marker error now tells the agent to ask the user before
+  calling `store_init`.
+- **The docs register the server once, without `--store`.** Claude Code
+  uses `claude mcp add --scope user redthread -- uvx redthread mcp-serve`,
+  and every other client's snippet drops `--store` too.
+- **A tighter AGENTS.md section that asks to install Redthread.** The text
+  `agents_md_bootstrap` writes (and the docs sample, now generated from
+  it) is about half as long. It tells the agent to stop and ask the user
+  to install Redthread when neither the MCP tools nor the CLI exist,
+  instead of quietly working without memory. It no longer pins an
+  absolute `--store` path, which was wrong on every other machine; the CLI
+  line names a store only when it is not at `./redthread-store`.
+- **Docs site: Cloudflare Web Analytics replaces Google Analytics.** It is
+  cookieless, so the cookie-consent banner and its footer link are gone.
+
 ## [0.14] - 2026-09-23
 
 ### Changed

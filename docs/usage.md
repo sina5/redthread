@@ -222,21 +222,21 @@ again on a different machine](#find-the-store-again-on-a-different-machine).
 
 ### One registration, many projects (discovery mode)
 
-`--store` binds the server to one store for all of its life.
-
-- This is correct for clients that register MCP servers for each project,
-  for example the `.mcp.json` file of Claude Code.
-- This is not correct for clients that use one global registration for
-  all windows. Examples are `~/.cursor/mcp.json` of Cursor, Windsurf, and
-  the user-level `mcp.json` of VS Code. With these clients, one `--store`
-  value causes all repos to use the store of the *first* repo.
-
 If you do not give `--store`, the server operates in **discovery mode**.
-It finds the store for each call, not for each process.
+This is the recommended setup for all clients. You register the server
+one time, and it serves each project its own store. It finds the store
+for each call, not for each process.
 
 ```bash
 redthread mcp-serve
 ```
+
+`--store` binds the server to one store for all of its life. Use it only
+for a registration that belongs to one project. Do not use it in a
+global registration, for example `~/.cursor/mcp.json`, the user scope of
+Claude Code, Windsurf, or the user-level `mcp.json` of VS Code. With a
+global registration, one `--store` value causes all repos to use the
+store of one repo.
 
 For each call, the server finds a workspace. Then it goes up the
 directory tree to the nearest `.redthread.yaml` file. It uses the store
@@ -254,15 +254,26 @@ in this list:
    variable into the `env` of a server.
 4. The directory where the server started (`--host-repo`, default `.`).
 
-If the workspace and its parent directories have no marker, the server
-refuses the call. The error message gives the `redthread init` or
-`redthread attach` command that corrects the problem. The server never
-uses the store of a different project. A fallback of this type causes
-the incorrect memory records that this mode prevents.
+If the workspace and its parent directories have no marker, the project
+does not have memory yet. The server never uses the store of a different
+project. A fallback of this type causes the incorrect memory records that
+this mode prevents. Instead, the error tells the agent to ask you whether
+to set up memory for the repo. If you agree, the agent calls `store_init`.
+You do not run a CLI command. `store_init` does these steps:
 
-Thus, each repo that must have memory must have a committed marker.
-`redthread init --worktree-repo .` and `redthread attach --host-repo .`
-both write and commit a marker.
+- It finds the root of the git repo that contains the workspace. If the
+  workspace is not in a git repo, it runs `git init` in the workspace.
+- It makes the store as an orphan-branch worktree at
+  `./redthread-store`, on the branch `redthread-store`. Your checked-out
+  branch does not change.
+- It commits `.redthread.yaml` and a `.gitignore` line to your current
+  branch. After you push, each clone finds the store automatically.
+
+`project_id` defaults to the name of the repo directory, and `phases`
+defaults to `build,test,present`. To give other values, tell the agent,
+or run `redthread init --worktree-repo .` yourself. To use a store that
+already exists, run `redthread attach --host-repo .`. `store_init`
+refuses to make a store in your home directory or in a filesystem root.
 
 !!! note "Pinned mode does not change"
     If you give `--store`, the server operates as before. This includes
@@ -287,8 +298,13 @@ Select your client. You can paste the text in each tab without changes.
 === "🟠 Claude Code"
 
     ```bash
-    claude mcp add redthread -- uvx redthread mcp-serve --store /path/to/my-store
+    claude mcp add --scope user redthread -- uvx redthread mcp-serve
     ```
+
+    Run this command one time. It registers the server for all your
+    projects. Each project gets its own store from its `.redthread.yaml`
+    file. Refer to [One registration, many
+    projects](#one-registration-many-projects-discovery-mode).
 
     On the first start, `uvx` gets `redthread` from PyPI. Thus, a
     checkout or an install before this step is not necessary.
@@ -297,13 +313,11 @@ Select your client. You can paste the text in each tab without changes.
     `uv tool install redthread`), remove `uvx`:
 
     ```bash
-    claude mcp add redthread -- redthread mcp-serve --store /path/to/my-store
+    claude mcp add --scope user redthread -- redthread mcp-serve
     ```
 
-    By default, this command registers the server only for the current
-    project. To use it in all your projects, add `--scope user`. To write a
-    `.mcp.json` file that you can commit and share with your team, add
-    `--scope project`.
+    To write a `.mcp.json` file that you can commit and share with your
+    team, use `--scope project` instead of `--scope user`.
 
     To make sure that the server operates, type `/mcp` in Claude Code. The
     `redthread` server shows as connected with 19 tools. For a quick test,
@@ -322,7 +336,7 @@ Select your client. You can paste the text in each tab without changes.
     ```bash
     python -c "
     import base64, json, webbrowser
-    config = {'command': 'uvx', 'args': ['redthread', 'mcp-serve', '--store', '/path/to/my-store']}
+    config = {'command': 'uvx', 'args': ['redthread', 'mcp-serve']}
     encoded = base64.b64encode(json.dumps(config).encode()).decode()
     webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&config={encoded}')
     "
@@ -338,25 +352,8 @@ Select your client. You can paste the text in each tab without changes.
     To do the configuration manually, use one of these procedures:
 
     - Go to Settings → MCP (or *MCP & Integrations*) → *Add Custom MCP*.
-    - Edit `.cursor/mcp.json` (for one project, and you can share it).
     - Edit `~/.cursor/mcp.json` (for all projects).
-
-    ```json
-    {
-      "mcpServers": {
-        "redthread": {
-          "command": "uvx",
-          "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
-        }
-      }
-    }
-    ```
-
-    **Do you register the server globally?** Cursor uses one
-    `~/.cursor/mcp.json` entry for all project windows. If the entry
-    contains a fixed `--store`, the memory of all repos goes to the store
-    of the first repo. Thus, remove `--store`. Then the `.redthread.yaml`
-    file of each project selects its store:
+    - Edit `.cursor/mcp.json` (for one project, and you can share it).
 
     ```json
     {
@@ -369,20 +366,24 @@ Select your client. You can paste the text in each tab without changes.
     }
     ```
 
-    Refer to [One registration, many
+    Cursor uses one `~/.cursor/mcp.json` entry for all project windows.
+    Do not add `--store` to it. With `--store`, the memory of all repos
+    goes to the store of one repo. Without `--store`, the
+    `.redthread.yaml` file of each project selects its store. Refer to
+    [One registration, many
     projects](#one-registration-many-projects-discovery-mode). This also
     applies to Windsurf and to the user-level `mcp.json` of VS Code.
 
 === "🔵 VS Code (Copilot)"
 
     ```bash
-    code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","/path/to/my-store"]}'
+    code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve"]}'
     ```
 
     If `redthread` is already installed, remove `uvx`:
 
     ```bash
-    code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve","--store","/path/to/my-store"]}'
+    code --add-mcp '{"name":"redthread","command":"redthread","args":["mcp-serve"]}'
     ```
 
     If you use the Insiders build, use `code-insiders` instead of `code`.
@@ -397,7 +398,7 @@ Select your client. You can paste the text in each tab without changes.
         "redthread": {
           "type": "stdio",
           "command": "uvx",
-          "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
+          "args": ["redthread", "mcp-serve"]
         }
       }
     }
@@ -414,7 +415,7 @@ Select your client. You can paste the text in each tab without changes.
       "mcpServers": {
         "redthread": {
           "command": "uvx",
-          "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
+          "args": ["redthread", "mcp-serve"]
         }
       }
     }
@@ -433,7 +434,7 @@ Select your client. You can paste the text in each tab without changes.
       "mcpServers": {
         "redthread": {
           "command": "uvx",
-          "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
+          "args": ["redthread", "mcp-serve"]
         }
       }
     }
@@ -446,7 +447,7 @@ Select your client. You can paste the text in each tab without changes.
     ```toml
     [mcp_servers.redthread]
     command = "uvx"
-    args = ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
+    args = ["redthread", "mcp-serve"]
     ```
 
 === "Gemini CLI"
@@ -459,7 +460,7 @@ Select your client. You can paste the text in each tab without changes.
       "mcpServers": {
         "redthread": {
           "command": "uvx",
-          "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"]
+          "args": ["redthread", "mcp-serve"]
         }
       }
     }
@@ -476,7 +477,7 @@ Select your client. You can paste the text in each tab without changes.
         mcp_servers={
             "redthread": {
                 "command": "uvx",
-                "args": ["redthread", "mcp-serve", "--store", "/path/to/my-store"],
+                "args": ["redthread", "mcp-serve"],
             }
         }
     )
@@ -490,51 +491,14 @@ Select your client. You can paste the text in each tab without changes.
 ### Make your agent use the memory (AGENTS.md)
 
 When you register the server, the agent gets the *capability*. A short
-note in the instructions file of your project gives it the *habit*.
-Without this note, most agents do not call memory tools if you do not tell
-them to.
+section in the instructions file of your project gives it the *habit*.
+Without this section, most agents do not call memory tools if you do not
+tell them to.
 
-Add this text to your `AGENTS.md` file (most coding agents read it) or to
-`CLAUDE.md`. Change it as necessary:
-
-````markdown
-## Memory (Redthread)
-
-The long-term memory of this project is a Redthread store (MCP server
-"redthread"). All sessions, machines, and agents that work on this
-project use it. Use only this memory for this project.
-
-- At the start of the session, call `context_bootstrap` one time. It
-  returns the pipeline, the recent runs, and the memory index of this
-  project in one call. Then use `memory_read` to read the entries that
-  apply before you make changes.
-- Do not record long-term knowledge in other locations. Do not use the
-  memory directory of the harness (for example,
-  `~/.claude/projects/**/memory/`) or a scratch notes file. Other
-  sessions, machines, and agents cannot see these locations.
-- After you complete an important task, write a dated summary with
-  `memory_write`. Always add a one-line `description`. Use the namespace
-  `sessions` and a key like `2026-07-18_short-slug`. Write what changed,
-  why, how you validated it, and the remaining work. Write when the task
-  is complete, not at the end of the session. Do not wait for the user to
-  tell you.
-- `memory_write` commits your entry and pushes it in the background. Thus,
-  the memory goes to other machines without a second step, and you do not
-  wait for the network. Examine the `sync` field that it returns. If it
-  shows `failed`, or if a subsequent call shows that a previous push
-  failed, correct the problem.
-- Put long-term rules and decisions in the `notes` namespace. Do not store
-  secrets.
-- If the MCP server is not connected, use the CLI on the same store. Do
-  not skip memory. Use `redthread bootstrap` and `redthread memory
-  list|search|read|write ...`.
-````
-
-You can use all namespace names. `sessions` and `notes` are only a
-convention that operates well. Use the names that apply to your team.
-
-For a full version of this file that also installs Redthread and registers
-the MCP server, refer to the [AGENTS.md example](agents-md.md).
+Tell the agent to call `agents_md_bootstrap`. This tool writes the section
+into `AGENTS.md` (or `CLAUDE.md`). To copy the section manually, refer to
+the [AGENTS.md example](agents-md.md). The section also tells the agent to
+ask you to install Redthread when it is missing on a machine.
 
 !!! danger "Do not store secrets"
     The memory store is a git repo. Usually, you push it to a shared

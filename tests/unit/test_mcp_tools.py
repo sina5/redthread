@@ -547,6 +547,17 @@ def test_memory_write_names_the_project_it_wrote_to(tmp_path):
     assert result["project_id"] == "demo"
 
 
+def test_agents_md_bootstrap_asks_to_install_and_omits_the_default_store(tmp_path):
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    tools.agents_md_bootstrap(project_dir / "redthread-store", project_dir, "demo")
+
+    text = (project_dir / "AGENTS.md").read_text(encoding="utf-8")
+    assert "If Redthread is missing" in text
+    assert "uv tool install redthread" in text
+    assert "--store" not in text
+
+
 def test_agents_md_bootstrap_pins_the_expected_project_id(tmp_path):
     project_dir = tmp_path / "proj"
     project_dir.mkdir()

@@ -5,7 +5,7 @@ Portable, git-backed memory for AI agents and multi-phase workflows.
 [![CI](https://github.com/sina5/redthread/actions/workflows/ci.yml/badge.svg)](https://github.com/sina5/redthread/actions/workflows/ci.yml)
 [![Docs](https://github.com/sina5/redthread/actions/workflows/docs.yml/badge.svg)](https://sina5.github.io/redthread/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.14-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.15-blue.svg)](CHANGELOG.md)
 
 ![Redthread — a red thread running through every phase of a pipeline](docs/assets/redthread.png)
 
@@ -32,8 +32,10 @@ Phase names are data, not code. Each project declares its own pipeline in
   Do not use a local `.claude`/`.agent` folder.
 - **One registration for many projects**: Run `mcp-serve` without
   `--store`. Each workspace then gets the store that its committed
-  `.redthread.yaml` file names. Thus, one global MCP entry (Cursor,
-  Windsurf, VS Code) operates correctly in all your repos.
+  `.redthread.yaml` file names. Thus, one global MCP entry (Claude Code
+  user scope, Cursor, Windsurf, VS Code) operates correctly in all your
+  repos. In a repo that has no store yet, the agent's `store_init` call
+  makes one as an orphan-branch worktree, with no CLI step.
 - **Portable by design**: The key of each entry is `project_id` /
   `run_id` / `phase` / `entry_id`. The key is never a hostname or an
   absolute path. To move a phase to a different machine during a run, use
@@ -67,38 +69,36 @@ pip install redthread          # or: uv tool install redthread
 ### Option 1 — Let the agent do the setup (recommended)
 
 Copy the [AGENTS.md example](https://sina5.github.io/redthread/agents-md/)
-into your project. The next time the agent opens the project, it does
-these steps:
+into your project. The next time an agent opens the project, it uses
+Redthread as its memory:
 
-1. It installs Redthread.
-2. It makes the store.
-3. It registers the MCP server.
+1. If Redthread is not installed, the agent stops and asks you to install
+   it. It gives you the two commands to run.
+2. If the repo has no store yet, the agent asks you, and then calls
+   `store_init`.
 
-You do not do manual steps. By default, the store is an **orphan-branch git
-worktree of the same repo**. Thus, you do not have to set up a second
-remote, and the active branch of the repo does not change.
+By default, the store is an **orphan-branch git worktree of the same
+repo**. Thus, you do not have to set up a second remote, and the active
+branch of the repo does not change.
 
 ### Option 2 — Register the MCP server manually
 
-Make a store:
-
-```bash
-redthread init my-project --phases build,test,present --store ./my-store
-```
-
-Then register the store with your agent. Select your client:
+Register the server one time. You do not make a store first, and you do not give a
+`--store` path: the same registration serves every project. The first time an agent
+uses Redthread in a repo, it asks you, then calls `store_init`, which makes the store
+as an orphan-branch worktree at `./redthread-store`. Select your client:
 
 <details open>
 <summary>🟠 Claude Code</summary>
 
 ```bash
-claude mcp add redthread -- uvx redthread mcp-serve --store ./my-store
+claude mcp add --scope user redthread -- uvx redthread mcp-serve
 ```
 
 If `redthread` is already installed, remove `uvx`:
 
 ```bash
-claude mcp add redthread -- redthread mcp-serve --store ./my-store
+claude mcp add --scope user redthread -- redthread mcp-serve
 ```
 
 To make sure that the server operates, type `/mcp` in Claude Code. The
@@ -116,7 +116,7 @@ Python, which Redthread already uses:
 ```bash
 python -c "
 import base64, json, webbrowser
-config = {'command': 'uvx', 'args': ['redthread', 'mcp-serve', '--store', './my-store']}
+config = {'command': 'uvx', 'args': ['redthread', 'mcp-serve']}
 encoded = base64.b64encode(json.dumps(config).encode()).decode()
 webbrowser.open(f'cursor://anysphere.cursor-deeplink/mcp/install?name=redthread&config={encoded}')
 "
@@ -130,7 +130,7 @@ Cursor shows an install confirmation. Accept it to complete the procedure.
 <summary>🔵 VS Code (Copilot)</summary>
 
 ```bash
-code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve","--store","./my-store"]}'
+code --add-mcp '{"name":"redthread","command":"uvx","args":["redthread","mcp-serve"]}'
 ```
 
 If you use the Insiders build, use `code-insiders` instead of `code`.
